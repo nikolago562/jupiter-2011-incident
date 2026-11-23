@@ -117,7 +117,9 @@ Config.KeisFaceImage = ""
 
 -- Sound ids ("rbxassetid://123..."). "" = silent until you add one.
 Config.Sounds = {
-	KeisChant = "", -- "keis keis keis o algo o algo", loops on every Keis
+	-- "keis keis keis o algo o algo": upload assets/audio/keis_chant.ogg (or keis_chant_filtered.ogg)
+	KeisChant = "",
+	-- optional: upload assets/audio/keis_chant_boss.ogg. If empty, the boss plays KeisChant slowed down.
 	BossChant = "",
 	Music = "", -- background loop
 	WaveStart = "",
@@ -128,6 +130,9 @@ Config.Sounds = {
 	LevelUp = "",
 	Buy = "",
 }
+
+Config.KEIS_CHANT_CHANCE = 0.5 -- chance a Keis chants each cycle (text + sound)
+Config.MAX_SIMULTANEOUS_CHANTS = 6 -- cap on chant sounds playing at once
 
 Config.KeisChatter = {
 	"keis keis keis o algo o algo",

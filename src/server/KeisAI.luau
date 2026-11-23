@@ -13,6 +13,7 @@ Keis.__index = Keis
 
 -- Set by the GameManager -----------------------------------------------------------------
 Keis.registry = {} :: { [Model]: any }
+Keis.chantsPlaying = 0 -- how many chant sounds are playing right now (capped so it never turns into noise)
 Keis.hooks = {
 	folder = nil :: Folder?,
 	reactor = nil :: BasePart?,
@@ -185,15 +186,14 @@ local function buildModel(def: any, position: Vector3)
 		local sound = Instance.new("Sound")
 		sound.Name = "Chant"
 		sound.SoundId = chantId
-		sound.Looped = true
-		sound.Volume = if def.boss then 1.6 else 0.7
-		sound.PlaybackSpeed = (if def.boss then 0.8 else 1) * (0.92 + math.random() * 0.16)
-		sound.RollOffMinDistance = 6
-		sound.RollOffMaxDistance = if def.boss then 160 else 70
+		sound.Looped = false -- played in sync with the floating chant text (see Keis.new)
+		sound.Volume = if def.boss then 1.8 else 0.9
+		-- the boss uses the normal chant slowed down unless it has its own BossChant
+		sound:SetAttribute("BaseSpeed", if def.boss and Config.Sounds.BossChant == "" then 0.78 else 1)
+		sound.RollOffMinDistance = 8
+		sound.RollOffMaxDistance = if def.boss then 160 else 75
 		sound.RollOffMode = Enum.RollOffMode.InverseTapered
 		sound.Parent = root
-		sound.TimePosition = math.random() * 2
-		sound:Play()
 	end
 
 	return model, humanoid, root, face, bodyParts, chant, barBack, barFill
@@ -247,16 +247,31 @@ function Keis.new(typeId: string, position: Vector3, hpScale: number)
 			task.wait(0.15)
 		end
 	end)
+	-- the chant: "keis keis keis o algo o algo" — text + sound together, now and then
 	task.spawn(function()
 		local rng = Random.new()
+		local sound = root:FindFirstChild("Chant") :: Sound?
+		task.wait(rng:NextNumber(0.3, 2.5))
 		while self.alive do
-			if def.boss or rng:NextNumber() < 0.45 then
+			if def.boss or rng:NextNumber() < Config.KEIS_CHANT_CHANCE then
 				self.chant.Text = Config.KeisChatter[rng:NextInteger(1, #Config.KeisChatter)]
 				self.chant.Rotation = rng:NextNumber(-5, 5)
-			else
+				local duration = rng:NextNumber(1.5, 2.6)
+				if sound and sound.Parent and (def.boss or Keis.chantsPlaying < Config.MAX_SIMULTANEOUS_CHANTS) then
+					local speed = ((sound:GetAttribute("BaseSpeed") :: number?) or 1) * rng:NextNumber(0.92, 1.08)
+					sound.PlaybackSpeed = speed
+					sound.TimePosition = 0
+					sound:Play()
+					Keis.chantsPlaying += 1
+					duration = if sound.TimeLength > 0 then sound.TimeLength / speed else 5
+					task.delay(duration, function()
+						Keis.chantsPlaying -= 1
+					end)
+				end
+				task.wait(duration)
 				self.chant.Text = ""
 			end
-			task.wait(rng:NextNumber(1, 2.6))
+			task.wait(if def.boss then rng:NextNumber(1, 2.5) else rng:NextNumber(2, 6))
 		end
 	end)
 	return self
