@@ -58,6 +58,10 @@ July 14, 2011. Your crew is aboard the **USS KEPLER** in orbit around Jupiter. T
 | `src/client/KeisAnimator.client.luau` | Walks the Keis' spider legs (tripod gait) |
 
 ## Running it
+**Easiest (no Rojo):** download `Jupiter2011Incident.rbxlx` from this repo and open it in Roblox Studio (File → Open from File). Press Play.
+After code changes, rebuild it with `python3 tools/build_place.py`.
+
+**With Rojo (live sync):**
 1. Run `rojo serve` in this folder, then connect from the Rojo plugin in a new Baseplate place.
 2. To test saving in Studio: **Game Settings → Security → Enable Studio Access to API Services**. The place must be published first.
 3. Press Play. It works solo.
