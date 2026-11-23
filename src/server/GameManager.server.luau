@@ -13,6 +13,10 @@ local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local Combat = require(script.Parent:WaitForChild("Combat"))
 local Suit = require(script.Parent:WaitForChild("Suit"))
 local MoonBuilder = require(script.Parent:WaitForChild("MoonBuilder"))
+local PerkSystem = require(script.Parent:WaitForChild("PerkSystem"))
+local Loot = require(script.Parent:WaitForChild("Loot"))
+local Missions = require(script.Parent:WaitForChild("Missions"))
+local Perks = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Perks"))
 local ServerStorage = game:GetService("ServerStorage")
 
 -- Remotes ---------------------------------------------------------------------------------
@@ -31,6 +35,9 @@ for _, name in {
 	"GameOver", -- (summary)
 	"Purchased", -- (id)
 	"Transition", -- (text, seconds) fade to black and back
+	"PerkOffer", -- (offerId, cards, rarity) pick-1-of-3
+	"Arc", -- (kind, points) chain lightning / ricochet / explosion visuals
+	"PickPerk", "RerollPerk", -- client → server
 	"Shoot", "Reload", "BuyUpgrade", "RepairReactor", "PlayRequest", -- client → server
 } do
 	local r = Instance.new("RemoteEvent")
@@ -126,9 +133,12 @@ task.spawn(function()
 end)
 
 -- Lights: power outage + alarm -------------------------------------------------------------
+local modSpeed = 0 -- extra Keis speed from the wave modifier
+local lastMission: string? = nil
+local activeMod: any = nil -- the current wave modifier (Config.Modifiers entry) or nil
 local function setPower(on: boolean)
 	setAttr("PowerOut", not on)
-	Keis.hooks.speedBonus = if on then 0 else Config.Waves.OutageSpeedBonus
+	Keis.hooks.speedBonus = modSpeed + (if on then 0 else Config.Waves.OutageSpeedBonus)
 	for _, panel in CollectionService:GetTagged("ShipLight") do
 		local l = panel:FindFirstChildOfClass("PointLight")
 		if l then
@@ -247,6 +257,13 @@ local function down(player: Player)
 	if not humanoid or not hrp or player:GetAttribute("Downed") then
 		return
 	end
+	if PerkSystem.get(player, "SecondWind") > 0 and not player:GetAttribute("SecondWindUsed") then
+		player:SetAttribute("SecondWindUsed", true)
+		humanoid.Health = humanoid.MaxHealth * 0.5
+		R.CrewAction:FireAllClients(player.UserId, "*Second Wind*")
+		R.Notify:FireAllClients(`{player.DisplayName} refused to go down (SECOND WIND)`, "gold")
+		return
+	end
 	player:SetAttribute("Downed", true)
 	player:SetAttribute("CrewStatus", "downed")
 	humanoid.Health = 1
@@ -335,6 +352,8 @@ Players.CharacterAutoLoads = false
 local function onPlayerAdded(player: Player)
 	PlayerData.load(player)
 	Combat.reset(player)
+	PerkSystem.reset(player)
+	Loot.resetKeys(player)
 	player.CharacterAdded:Connect(function(character)
 		onCharacter(player, character)
 	end)
@@ -362,6 +381,7 @@ end
 Players.PlayerRemoving:Connect(function(player)
 	PlayerData.release(player)
 	Combat.remove(player)
+	PerkSystem.remove(player)
 end)
 game:BindToClose(function()
 	for _, p in Players:GetPlayers() do
@@ -430,8 +450,26 @@ Keis.hooks.onExpired = function(k)
 end
 Keis.hooks.onKilled = function(k, killer: Player?)
 	local def = k.def
+	local mod = activeMod or {}
+	local dropAt = k.root.Position
 	if killer then
-		Combat.addCredits(killer, def.reward)
+		local creditMult = (1 + 0.25 * PerkSystem.get(killer, "Scavenger")) * (mod.credits or 1)
+		Combat.addCredits(killer, math.floor(def.reward * creditMult))
+		Combat.onKill(killer)
+		local vamp = PerkSystem.get(killer, "Vampire")
+		local hum = killer.Character and killer.Character:FindFirstChildOfClass("Humanoid")
+		if vamp > 0 and hum and hum.Health > 0 and not killer:GetAttribute("Downed") then
+			hum.Health = math.min(hum.MaxHealth, hum.Health + 4 * vamp)
+		end
+		if PerkSystem.get(killer, "GoldenTouch") > 0 and rng:NextNumber() < 0.08 then
+			Loot.dropKeys(dropAt, 1, true)
+			Combat.addCredits(killer, 15)
+		end
+		local keyChance = Config.KEY_DROP_CHANCE * (1 + 0.2 * PerkSystem.get(killer, "KeyMagnet"))
+		local keyCount = def.keys or (if def.boss then 6 elseif def.passive then 2 elseif rng:NextNumber() < keyChance then 1 else 0)
+		if keyCount > 0 then
+			Loot.dropKeys(dropAt, keyCount * (mod.keys or 1), def.passive == true)
+		end
 		Combat.addKill(killer)
 		PlayerData.addKill(killer)
 		grantXP(killer, def.xp)
@@ -470,6 +508,49 @@ Combat.hooks.repairReactor = function(player: Player): boolean
 	return true
 end
 Combat.init(remotes)
+
+PerkSystem.init(remotes)
+PerkSystem.hooks.onChanged = function(player: Player)
+	Combat.refresh(player)
+end
+PerkSystem.hooks.spendKey = function(player: Player): boolean
+	return Loot.spendKeys(player, 1)
+end
+PerkSystem.hooks.onPicked = function(player: Player, perkId: string)
+	local perk = Perks.byId[perkId]
+	if perk then
+		R.CrewAction:FireAllClients(player.UserId, `*{perk.name}*`)
+		if perk.rarity == "Legendary" then
+			R.Notify:FireAllClients(`{player.DisplayName} took {perk.name}`, "gold")
+		end
+	end
+end
+
+Loot.hooks.magnetRange = function(player: Player): number
+	return 8 + 14 * PerkSystem.get(player, "KeyMagnet")
+end
+Loot.hooks.onCrateReward = function(player: Player, kind: string)
+	if kind == "Credits" then
+		local c = 30 + wave * 6
+		Combat.addCredits(player, c)
+		R.Notify:FireClient(player, `CRATE · +{c} CREDITS`, "gold")
+	elseif kind == "Heal" then
+		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum.Health = hum.MaxHealth
+		end
+		R.Notify:FireClient(player, "CRATE · SUIT REPAIRED (FULL HEALTH)", "green")
+	elseif kind == "Perk" then
+		PerkSystem.offer(player, wave)
+		R.Notify:FireClient(player, "CRATE · EXTRA PERK CARD", "cyan")
+	elseif kind == "Keys" then
+		Loot.addKeys(player, 2)
+		R.Notify:FireClient(player, "CRATE · +2 KEYS", "gold")
+	elseif kind == "Legendary" then
+		PerkSystem.offer(player, wave, "Legendary")
+		R.Notify:FireAllClients(`{player.DisplayName} found a LEGENDARY card in a crate`, "gold")
+	end
+end
 
 -- Global leaderboard on the bridge ---------------------------------------------------------------
 local function renderBoard(entries: { { name: string, wave: number } })
@@ -539,38 +620,105 @@ local function randomCrewName(): string?
 	return if #names > 0 then names[rng:NextInteger(1, #names)] else nil
 end
 
-local function runWave(n: number): (boolean, string)
+-- floor positions for mission objects and crates on the current stage
+local function stagePoints(): { Vector3 }
+	if stage.name ~= "Moon" then
+		return stage.roomCenters
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { keisFolder }
+	local out = {}
+	for _, p in stage.roomCenters do
+		local hit = workspace:Raycast(p + Vector3.new(0, 60, 0), Vector3.new(0, -150, 0), params)
+		table.insert(out, if hit then hit.Position else p)
+	end
+	return out
+end
+
+local function runWave(n: number): (boolean, string, string, boolean)
 	local W = Config.Waves
-	local isBoss = n % W.BossEvery == 0
+	local kind = Missions.pick(n, rng, lastMission, W.BossEvery)
+	lastMission = kind
+	local def = Missions.Defs[kind]
+
+	-- a wave modifier from wave 3
+	activeMod = nil
+	if n >= Config.MODIFIER_FROM_WAVE and kind ~= "GoldRush" and rng:NextNumber() < Config.MODIFIER_CHANCE then
+		local ids = {}
+		for id in Config.Modifiers do
+			table.insert(ids, id)
+		end
+		table.sort(ids)
+		activeMod = Config.Modifiers[ids[rng:NextInteger(1, #ids)]]
+	end
+	local mod = activeMod or {}
+
 	local playerCount = math.max(1, #crew())
-	local count = math.floor((W.BaseCount + W.CountPerWave * (n - 1)) * (1 + (playerCount - 1) * W.ExtraPlayerMultiplier))
-	if isBoss then
+	local count = math.floor((W.BaseCount + W.CountPerWave * (n - 1)) * (1 + (playerCount - 1) * W.ExtraPlayerMultiplier) * (mod.count or 1))
+	if kind == "Boss" then
 		count = math.floor(count * 0.6)
 	end
-	currentHpScale = 1 + W.HealthScalePerWave * (n - 1)
-	local interval = math.max(W.SpawnIntervalMin, W.SpawnIntervalStart - 0.06 * (n - 1))
+	currentHpScale = (1 + W.HealthScalePerWave * (n - 1)) * (mod.hp or 1)
+	local interval = math.max(W.SpawnIntervalMin, W.SpawnIntervalStart - 0.06 * (n - 1)) / (mod.count or 1)
+	modSpeed = mod.speed or 0
+	Keis.hooks.speedBonus = modSpeed
 
 	setPhase("Wave")
 	setAttr("Wave", n)
+	setAttr("Mission", def.name)
+	setAttr("Modifier", if activeMod then `{activeMod.name} · {string.upper(activeMod.desc)}` else "")
 	setAlarm(true)
-	if isBoss then
-		R.Announce:FireAllClients("BOSS WAVE " .. n, "THE MASTER KEIS HAS BOARDED", "boss")
-		spawnKeis("Master", nil, currentHpScale * (1 + 0.35 * (playerCount - 1)))
-		narrate("Boss")
-	else
-		R.Announce:FireAllClients("WAVE " .. n, Config.WaveSubtitles[rng:NextInteger(1, #Config.WaveSubtitles)], "wave")
+	Loot.clearCrates()
+	for _, p in crew() do
+		p:SetAttribute("SecondWindUsed", false)
+		PerkSystem.resolvePending(p)
+	end
+
+	local title = if kind == "Boss" then `BOSS WAVE {n}` else `WAVE {n} · {def.name}`
+	local sub = def.desc .. (if activeMod then `   ·   {activeMod.name}` else "")
+	R.Announce:FireAllClients(title, sub, if kind == "Boss" then "boss" else "wave")
+	if mod.dark then
+		setPower(false)
+	end
+
+	local ctx = {
+		n = n,
+		rng = rng,
+		folder = keisFolder.Parent :: Instance,
+		reactorPos = stage.reactor.Position,
+		points = stagePoints(),
+		count = count,
+		spawnKeis = function(typeId: string, at: Vector3?, hpScale: number)
+			return spawnKeis(typeId, at, hpScale)
+		end,
+		hpScale = currentHpScale,
+		isAlive = function(p: Player): boolean
+			return crewStatus(p) == "alive"
+		end,
+		setPower = setPower,
+		narrate = narrate,
+		notify = function(text: string, color: string)
+			R.Notify:FireAllClients(text, color)
+		end,
+		setObjective = function(text: string, progress: number?)
+			setAttr("Objective", text)
+			setAttr("ObjectiveProgress", progress or -1)
+		end,
+		damageReactor = function(amount: number)
+			reactorHp = math.max(0, reactorHp - amount)
+			setAttr("ReactorHP", reactorHp)
+		end,
+	}
+	local mission = Missions.create(kind, ctx :: any)
+	mission:start()
+	if kind == "Defend" then
 		narrate("Vents", randomCrewName())
 	end
 
-	local outageAt: number? = nil
-	if n >= W.OutageFromWave and rng:NextNumber() < W.OutageChance then
-		outageAt = os.clock() + rng:NextNumber(8, 20)
-	end
-	local outageEndAt = 0
-	local outageOn = false
-
 	local spawned = 0
 	local nextSpawn = os.clock() + 1.5
+	local last = os.clock()
 	local result, reason = true, ""
 	while true do
 		if reactorHp <= 0 then
@@ -586,39 +734,53 @@ local function runWave(n: number): (boolean, string)
 			break
 		end
 		local now = os.clock()
-		if outageAt and not outageOn and now >= outageAt then
-			outageOn = true
-			outageEndAt = now + W.OutageDuration
-			setPower(false)
-			narrate("Outage")
-			R.Announce:FireAllClients("POWER FAILURE", "THE KEIS ARE FASTER IN THE DARK", "outage")
-		elseif outageOn and now >= outageEndAt then
-			outageOn = false
-			outageAt = nil
-			setPower(true)
-			narrate("PowerBack")
-		end
-		if spawned < count and now >= nextSpawn and Keis.countHostile() < W.MaxAlive then
-			spawnKeis(pickType(n), nil, currentHpScale)
-			spawned += 1
-			nextSpawn = now + interval * rng:NextNumber(0.6, 1.4)
-			if rng:NextNumber() < W.GoldenChance then
-				spawnKeis("Golden", nil, 1)
-				narrate("Golden")
+		local dt = now - last
+		last = now
+		local hostile = Keis.countHostile()
+		if mission.spawnMode == "count" then
+			if spawned < count and now >= nextSpawn and hostile < W.MaxAlive then
+				spawnKeis(pickType(n), nil, currentHpScale)
+				spawned += 1
+				nextSpawn = now + interval * rng:NextNumber(0.6, 1.4)
+				if rng:NextNumber() < W.GoldenChance then
+					spawnKeis("Golden", nil, 1)
+					narrate("Golden")
+				end
+			end
+		else
+			-- timed missions: Keis keep coming until the objective is done
+			local cap = math.min(W.MaxAlive, 6 + n * 2 + (playerCount - 1) * 3)
+			if now >= nextSpawn and hostile < cap then
+				spawnKeis(pickType(n), nil, currentHpScale)
+				nextSpawn = now + interval * rng:NextNumber(1, 1.8)
 			end
 		end
-		local hostile = Keis.countHostile()
-		setAttr("KeisLeft", (count - spawned) + hostile)
-		if spawned >= count and hostile == 0 then
+		hostile = Keis.countHostile()
+		local left = if mission.spawnMode == "count" then (count - spawned) + hostile else hostile
+		setAttr("KeisLeft", left)
+		local done = mission:tick(dt, left)
+		if mission.spawnMode == "count" and spawned >= count and hostile == 0 then
+			done = true
+		end
+		if done then
 			break
 		end
 		task.wait(0.2)
 	end
-	if outageOn then
+	mission:cleanup()
+	if result and mission.spawnMode == "timed" then
+		Keis.clearAll() -- the rest retreat into the vents
+		narrate("Retreat")
+	end
+	setAttr("Objective", "")
+	setAttr("ObjectiveProgress", -1)
+	modSpeed = 0
+	if ReplicatedStorage:GetAttribute("PowerOut") then
 		setPower(true)
 	end
+	Keis.hooks.speedBonus = 0
 	setAlarm(false)
-	return result, reason
+	return result, reason, kind, mission.success
 end
 
 local function applyStage(newStage: Stage)
@@ -690,6 +852,10 @@ end
 
 local function gameOver(reason: string)
 	Keis.clearAll()
+	Loot.clearKeys()
+	Loot.clearCrates()
+	setAttr("Mission", "")
+	setAttr("Modifier", "")
 	setAlarm(false)
 	setPower(true)
 	local summary = { wave = wave, reason = reason, crew = {} :: { any }, mvp = 0 }
@@ -726,8 +892,11 @@ local function startRun()
 	reactorHp = Config.REACTOR_MAX_HP
 	reactorWarned = false
 	setAttr("ReactorHP", reactorHp)
+	lastMission = nil
 	for _, p in crew() do
 		Combat.reset(p)
+		PerkSystem.reset(p)
+		Loot.resetKeys(p)
 		PlayerData.addRun(p)
 		p:LoadCharacter()
 	end
@@ -736,19 +905,35 @@ local function startRun()
 
 	while true do
 		wave += 1
-		local cleared, reason = runWave(wave)
+		local cleared, reason, kind, success = runWave(wave)
 		if not cleared then
 			gameOver(reason)
 			return
 		end
 		local bonus = Config.Waves.ClearBonusBase + Config.Waves.ClearBonusPerWave * wave
+		local special = kind ~= "Defend" and success
 		for _, p in crew() do
 			Combat.addCredits(p, bonus)
 			grantXP(p, Config.XP_PER_WAVE * wave)
 			PlayerData.recordWave(p, wave)
+			if special then
+				Loot.addKeys(p, Config.MISSION_KEY_REWARD)
+			end
+			-- pick-1-of-3 perk card (bosses give a legendary choice)
+			PerkSystem.offer(p, wave, if kind == "Boss" then "Legendary" else nil)
 		end
-		R.Announce:FireAllClients("WAVE " .. wave .. " CLEARED", `+{bonus} CREDITS · UPGRADE NOW [Q]`, "clear")
+		local missionName = Missions.Defs[kind].name
+		R.Announce:FireAllClients(if success then `{missionName} COMPLETE` else `{missionName} FAILED`,
+			`+{bonus} CREDITS{if special then ` · +{Config.MISSION_KEY_REWARD} KEYS` else ""} · PICK A PERK · OPEN CRATES`, if success then "clear" else "boss")
 		narrate("WaveClear")
+		-- supply crates around the map (open them with keys)
+		local spots = {}
+		for _, p in stagePoints() do
+			if (Vector3.new(p.X, 0, p.Z) - Vector3.new(stage.reactor.Position.X, 0, stage.reactor.Position.Z)).Magnitude > 14 then
+				table.insert(spots, p + Vector3.new(rng:NextNumber(-6, 6), 0, rng:NextNumber(-6, 6)))
+			end
+		end
+		Loot.spawnCrates(spots, Config.CRATES_PER_BREAK)
 		if wave == Config.LANDING_WAVE and stage.name == "Ship" then
 			landOnIo()
 		end

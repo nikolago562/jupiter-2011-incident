@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local Keis = require(script.Parent:WaitForChild("KeisAI"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local PerkSystem = require(script.Parent:WaitForChild("PerkSystem"))
 
 local Combat = {}
 
@@ -21,6 +22,8 @@ type State = {
 	damageDealt: number,
 }
 local states: { [Player]: State } = {}
+Combat.adrenalineUntil = {} :: { [Player]: number }
+local hitCounter: { [Player]: number } = {}
 
 Combat.hooks = {
 	canShoot = function(_player: Player): boolean
@@ -48,15 +51,23 @@ function Combat.stats(player: Player)
 	local data = PlayerData.get(player)
 	local level = if data then data.Level else 1
 	local W = Config.Weapons[if st then st.weapon else "Blaster"] or Config.Weapons.Blaster
+	local function perk(id: string): number
+		return PerkSystem.get(player, id)
+	end
+	local overclock = perk("Overclock")
+	local adrenaline = if (Combat.adrenalineUntil[player] or 0) > os.clock() then perk("Adrenaline") else 0
 	return {
-		damage = W.damage * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1)),
-		interval = W.interval * (0.88 ^ (up.FireRate or 0)),
-		mag = W.mag + W.magPerLevel * (up.Mag or 0),
-		reload = W.reload,
+		damage = W.damage * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1))
+			* (1 + 0.15 * perk("HollowPoints")) * (1 + 0.15 * overclock),
+		interval = W.interval * (0.88 ^ (up.FireRate or 0)) / (1 + 0.4 * overclock) / (1 + 0.3 * adrenaline),
+		mag = math.floor((W.mag + W.magPerLevel * (up.Mag or 0)) * (1 + 0.5 * perk("ExtendedMag"))),
+		reload = W.reload * (0.7 ^ perk("QuickHands")),
 		jitter = W.jitter,
 		pellets = 1 + (up.Multishot or 0),
-		maxHealth = Config.BASE_HEALTH + 25 * (up.MaxHealth or 0),
-		walkSpeed = Config.BASE_WALKSPEED + 1.5 * (up.Speed or 0),
+		maxHealth = Config.BASE_HEALTH + 25 * (up.MaxHealth or 0) + 20 * perk("SuitPadding"),
+		walkSpeed = (Config.BASE_WALKSPEED + 1.5 * (up.Speed or 0)) * (1 + 0.08 * perk("LightStep")),
+		critChance = 0.1 * perk("CritLens"),
+		critMult = Config.Weapon.CritMultiplier + 0.75 * perk("CritLens"),
 	}
 end
 
@@ -102,6 +113,36 @@ function Combat.getRunStats(player: Player): (number, number)
 		return 0, 0
 	end
 	return st.kills, math.floor(st.damageDealt)
+end
+
+function Combat.refresh(player: Player)
+	local st = states[player]
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	local s = Combat.stats(player)
+	if humanoid then
+		local ratio = humanoid.Health / math.max(humanoid.MaxHealth, 1)
+		humanoid.MaxHealth = s.maxHealth
+		humanoid.Health = math.max(1, s.maxHealth * ratio)
+		if not player:GetAttribute("Downed") then
+			humanoid.WalkSpeed = s.walkSpeed
+		end
+	end
+	if st and not st.reloading then
+		st.ammo = math.max(st.ammo, math.min(st.ammo + 0, s.mag))
+	end
+	publish(player)
+end
+
+function Combat.onKill(player: Player)
+	if PerkSystem.get(player, "Adrenaline") > 0 then
+		Combat.adrenalineUntil[player] = os.clock() + 2
+		publish(player)
+		task.delay(2.05, function()
+			if player.Parent then
+				publish(player)
+			end
+		end)
+	end
 end
 
 function Combat.addCredits(player: Player, amount: number)
@@ -243,6 +284,61 @@ local function startReload(player: Player)
 	end)
 end
 
+local arcFrom: (Player, Vector3, number, number, number, any, string) -> ()
+local explode: (Player, Vector3, number, any) -> ()
+
+-- deals damage, records stats, tells the shooter (damage numbers / hitmarkers)
+local function hitKeis(player: Player, k: any, dmg: number, at: Vector3, crit: boolean): boolean
+	local st = states[player]
+	if st then
+		st.damageDealt += math.min(dmg, k.hp)
+	end
+	local killed = k:takeDamage(dmg, player)
+	;(remotes:FindFirstChild("HitConfirm") :: RemoteEvent):FireClient(player, at, math.floor(dmg), crit, killed,
+		if killed then k.def.reward else 0, k.def.passive == true)
+	return killed
+end
+
+local function keisNear(pos: Vector3, radius: number, except: any): { any }
+	local list = {}
+	for _, other in Keis.registry do
+		if other.alive and other ~= except and (other.root.Position - pos).Magnitude <= radius then
+			table.insert(list, other)
+		end
+	end
+	table.sort(list, function(a, b)
+		return (a.root.Position - pos).Magnitude < (b.root.Position - pos).Magnitude
+	end)
+	return list
+end
+
+-- Chain Lightning / Ricochet: jump from Keis to Keis
+arcFrom = function(player: Player, from: Vector3, dmg: number, jumps: number, radius: number, first: any, kind: string)
+	local points = { from }
+	local last, pos = first, from
+	for _ = 1, jumps do
+		local target = keisNear(pos, radius, last)[1]
+		if not target then
+			break
+		end
+		local tp = target.root.Position + Vector3.new(0, 3 * target.def.scale, 0)
+		table.insert(points, tp)
+		hitKeis(player, target, dmg, tp, false)
+		last, pos = target, tp
+	end
+	if #points > 1 then
+		;(remotes:FindFirstChild("Arc") :: RemoteEvent):FireAllClients(kind, points)
+	end
+end
+
+-- Explosive Crits
+explode = function(player: Player, at: Vector3, dmg: number, except: any)
+	for _, k in keisNear(at, 9, except) do
+		hitKeis(player, k, dmg, k.root.Position + Vector3.new(0, 3, 0), false)
+	end
+	;(remotes:FindFirstChild("Arc") :: RemoteEvent):FireAllClients("boom", { at })
+end
+
 local function onShoot(player: Player, aimPos: any)
 	if typeof(aimPos) ~= "Vector3" then
 		return
@@ -302,12 +398,24 @@ local function onShoot(player: Player, aimPos: any)
 		if result then
 			local k = Keis.fromPart(result.Instance)
 			if k and k.alive then
-				local crit = result.Instance.Name == "Face" or result.Instance.Name == "Bow"
-				local dmg = s.damage * (if crit then Config.Weapon.CritMultiplier else 1)
-				st.damageDealt += math.min(dmg, k.hp)
-				local killed = k:takeDamage(dmg, player)
-				;(remotes:FindFirstChild("HitConfirm") :: RemoteEvent):FireClient(player, hitPos, math.floor(dmg), crit, killed,
-					if killed then k.def.reward else 0, k.def.passive == true)
+				local crit = result.Instance.Name == "Face" or result.Instance.Name == "Bow" or math.random() < s.critChance
+				local dmg = s.damage * (if crit then s.critMult else 1)
+				local killed = hitKeis(player, k, dmg, hitPos, crit)
+				-- perks that trigger on hits
+				if crit and PerkSystem.get(player, "ExplosiveCrits") > 0 then
+					explode(player, hitPos, s.damage * 0.4 * PerkSystem.get(player, "ExplosiveCrits"), k)
+				end
+				local chain = PerkSystem.get(player, "ChainLightning")
+				if chain > 0 then
+					hitCounter[player] = (hitCounter[player] or 0) + 1
+					if hitCounter[player] % 5 == 0 then
+						arcFrom(player, hitPos, s.damage * 0.5, 1 + 2 * chain, 22, k, "zap")
+					end
+				end
+				local bounces = PerkSystem.get(player, "Ricochet")
+				if killed and bounces > 0 then
+					arcFrom(player, hitPos, s.damage * 0.6, bounces, 16, k, "ricochet")
+				end
 			end
 		end
 	end

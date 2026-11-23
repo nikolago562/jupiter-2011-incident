@@ -16,6 +16,15 @@ July 14, 2011. Your crew is aboard the **USS KEPLER** in orbit around Jupiter. T
 - **Io (after wave 10):** the ship lands on Jupiter's volcanic moon. Terrain with craters, lava lakes, a smoking volcano,
   sulfur fields, the landed ship, floodlights, and **25% gravity** (long floaty jumps, dust when you land).
 
+## Why it's addictive: every run is different
+- **Every wave is a random mission:** HOLD THE LINE (destroy all), BLACKOUT (find 3 fuses in the dark and carry them to the fuse box),
+  TRANSMIT (hold the beacon zone), KEYMASTER HUNT (kill the elite before it escapes), GOLD RUSH (golden Keis everywhere), and a BOSS every 5th wave.
+- **Wave modifiers** from wave 3: SWARM, ARMORED, FRENZY, DARKNESS, DOUBLE KEYS, BOUNTY.
+- **Perk cards:** after every wave, pick 1 of 3 (Common / Rare / Legendary). They stack into a build:
+  Ricochet + Chain Lightning + Explosive Crits, Vampire Suit + Overclock, Key Magnet + Golden Touch… Bosses offer a Legendary choice.
+- **Keys:** the Keis drop keys. Spend them on **supply crates** that appear between waves (credits, heal, extra perk card, keys, or a Legendary card)
+  or on **rerolling** your perk cards.
+
 ## The loop
 1. **Lobby:** the crew spawns on the bridge. Through the windows you can see Jupiter, with its bands, the Great Red Spot and two moons.
 2. **Waves:** the Keis pour out of the vents and go for the **reactor**, or for any crew member who gets close.

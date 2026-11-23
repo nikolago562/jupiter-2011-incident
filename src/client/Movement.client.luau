@@ -110,7 +110,7 @@ RunService:BindToRenderStep("JupiterMovement", Enum.RenderPriority.Camera.Value 
 	end
 	local alive = humanoid.Health > 0 and not player:GetAttribute("Downed")
 	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-	local shoulder = alive and hasWeapon() and not touchOnly and not sprinting
+	local shoulder = alive and hasWeapon() and not touchOnly and not sprinting and not player:GetAttribute("UIOpen")
 
 	if shoulder then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter

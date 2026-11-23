@@ -41,6 +41,34 @@ local waveSub = text({ Font = F.Bold, TextSize = 14, TextColor3 = C.Cream, TextX
 	Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 0, 18), Text = "", Parent = wavePanel })
 local reactorBar = Theme.bar({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 64), Size = UDim2.new(1, -28, 0, 16), Parent = wavePanel }, C.Cyan)
 
+-- Objective panel (under the wave panel): mission, objective + progress, modifier
+local objPanel = Theme.panel({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 112), Size = UDim2.fromOffset(440, 70),
+	Visible = false, Parent = gui })
+local objMission = text({ Font = F.Title, TextSize = 13, TextColor3 = C.Accent, TextXAlignment = Enum.TextXAlignment.Center,
+	Position = UDim2.fromOffset(0, 8), Size = UDim2.new(1, 0, 0, 16), Parent = objPanel })
+local objText = text({ Font = F.Bold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(10, 26),
+	Size = UDim2.new(1, -20, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, Parent = objPanel })
+local objBar = Theme.bar({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 48), Size = UDim2.new(1, -40, 0, 8), Parent = objPanel }, C.Gold)
+local modChip = text({ Font = F.Mono, TextSize = 14, TextColor3 = C.Danger, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 1, 4), Size = UDim2.fromOffset(440, 18), TextStrokeTransparency = 0.4, Parent = objPanel })
+local function refreshObjective()
+	local phase = ReplicatedStorage:GetAttribute("Phase")
+	local objective = (ReplicatedStorage:GetAttribute("Objective") :: string?) or ""
+	objPanel.Visible = phase == "Wave" and objective ~= ""
+	objMission.Text = (ReplicatedStorage:GetAttribute("Mission") :: string?) or ""
+	objText.Text = objective
+	local prog = (ReplicatedStorage:GetAttribute("ObjectiveProgress") :: number?) or -1
+	objBar.frame.Visible = prog >= 0
+	if prog >= 0 then
+		objBar:set(prog)
+	end
+	modChip.Text = (ReplicatedStorage:GetAttribute("Modifier") :: string?) or ""
+end
+for _, a in { "Phase", "Mission", "Objective", "ObjectiveProgress", "Modifier" } do
+	ReplicatedStorage:GetAttributeChangedSignal(a):Connect(refreshObjective)
+end
+refreshObjective()
+
 local function formatTime(t: number): string
 	return string.format("%d:%02d", t // 60, t % 60)
 end
@@ -173,6 +201,8 @@ local levelBadge = make("Frame", { Position = UDim2.fromOffset(12, 12), Size = U
 local levelText = text({ Font = F.Heavy, TextSize = 20, TextColor3 = C.Bg, Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, Parent = levelBadge })
 local titleText = text({ Font = F.Title, TextSize = 13, TextColor3 = C.Accent, Position = UDim2.fromOffset(68, 12), Size = UDim2.new(1, -80, 0, 16), Parent = card })
 local creditsText = text({ Font = F.Heavy, TextSize = 20, TextColor3 = C.Gold, Position = UDim2.fromOffset(68, 32), Size = UDim2.new(1, -80, 0, 24), Parent = card })
+local keysText = text({ Font = F.Heavy, TextSize = 20, TextColor3 = C.Cream, TextXAlignment = Enum.TextXAlignment.Right,
+	Position = UDim2.fromOffset(68, 32), Size = UDim2.new(1, -80, 0, 24), Parent = card })
 local healthBar = Theme.bar({ Position = UDim2.fromOffset(12, 66), Size = UDim2.new(1, -24, 0, 18), Parent = card }, C.Good)
 
 local function refreshCard()
@@ -180,11 +210,41 @@ local function refreshCard()
 	levelText.Text = tostring(lvl)
 	titleText.Text = player:GetAttribute("Title") or "CADET"
 	creditsText.Text = `◆ {player:GetAttribute("Credits") or 0}`
+	keysText.Text = `🔑 {player:GetAttribute("Keys") or 0}`
 end
-for _, a in { "Level", "Title", "Credits" } do
+for _, a in { "Level", "Title", "Credits", "Keys" } do
 	player:GetAttributeChangedSignal(a):Connect(refreshCard)
 end
 refreshCard()
+
+-- Owned perks (row of chips above the upgrade button)
+local Perks = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Perks"))
+local perkRow = make("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -168), Size = UDim2.fromOffset(300, 34),
+	BackgroundTransparency = 1, Parent = gui })
+make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), Parent = perkRow })
+local function refreshPerks()
+	for _, c in perkRow:GetChildren() do
+		if c:IsA("Frame") then
+			c:Destroy()
+		end
+	end
+	local owned = Perks.decode(player:GetAttribute("Perks") :: string?)
+	for _, perk in Perks.List do
+		local n = owned[perk.id]
+		if n and n > 0 then
+			local chip = make("Frame", { Size = UDim2.fromOffset(32, 32), BackgroundColor3 = C.Panel, BackgroundTransparency = 0.15, Parent = perkRow },
+				{ Theme.corner(6), Theme.stroke(Perks.Rarity[perk.rarity].color, 0.1, 1.5) })
+			text({ Font = F.Heavy, TextSize = 16, TextColor3 = Perks.Rarity[perk.rarity].color, TextXAlignment = Enum.TextXAlignment.Center,
+				Size = UDim2.fromScale(1, 1), Text = perk.icon, Parent = chip })
+			if n > 1 then
+				text({ Font = F.Bold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right, AnchorPoint = Vector2.new(1, 1),
+					Position = UDim2.new(1, -2, 1, 0), Size = UDim2.fromOffset(14, 12), Text = tostring(n), TextStrokeTransparency = 0.3, Parent = chip })
+			end
+		end
+	end
+end
+player:GetAttributeChangedSignal("Perks"):Connect(refreshPerks)
+refreshPerks()
 
 -- XP bar (bottom center)
 local xpBar = Theme.bar({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -10), Size = UDim2.fromOffset(420, 12), Parent = gui }, C.Accent)

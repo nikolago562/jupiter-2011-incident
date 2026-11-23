@@ -256,6 +256,36 @@ Remotes:WaitForChild("ShotFx").OnClientEvent:Connect(function(shooter: Player, o
 	end
 end)
 
+-- Perk visuals: chain lightning, ricochet, explosive crits ------------------------------------------------
+Remotes:WaitForChild("Arc").OnClientEvent:Connect(function(kind: string, points: { Vector3 })
+	if kind == "boom" then
+		local at = points[1]
+		local ball = make("Part", { Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false,
+			Shape = Enum.PartType.Ball, Material = Enum.Material.Neon, Color = Color3.fromRGB(255, 150, 50), Size = Vector3.one * 2,
+			CFrame = CFrame.new(at), Parent = tracerFolder })
+		make("PointLight", { Color = ball.Color, Range = 20, Brightness = 4, Parent = ball })
+		Theme.tween(ball, 0.3, { Size = Vector3.one * 18, Transparency = 1 })
+		Debris:AddItem(ball, 0.35)
+		return
+	end
+	local color = if kind == "zap" then Color3.fromRGB(150, 220, 255) else Color3.fromRGB(255, 170, 60)
+	for i = 1, #points - 1 do
+		local a, b = points[i], points[i + 1]
+		if kind == "zap" then
+			-- jagged lightning: split each jump into wobbly segments
+			local prev = a
+			for k = 1, 5 do
+				local t = k / 5
+				local p = a:Lerp(b, t) + (if k < 5 then Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5) * 2.2 else Vector3.zero)
+				tracer(prev, p, color)
+				prev = p
+			end
+		else
+			tracer(a, b, color)
+		end
+	end
+end)
+
 -- Hit feedback ---------------------------------------------------------------------------------------------
 local function popup(worldPos: Vector3, msg: string, color: Color3, size: number)
 	local anchor = make("Part", { Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, Transparency = 1,

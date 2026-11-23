@@ -63,10 +63,29 @@ Config.KeisTypes = {
 		color = Color3.fromRGB(200, 160, 80), unlockWave = 99, weight = 0 },
 	Golden = { name = "GOLDEN KEIS", hp = 80, speed = 17, damage = 0, reward = 60, xp = 20, scale = 0.9,
 		color = Color3.fromRGB(255, 200, 40), unlockWave = 1, weight = 0, passive = true, lifetime = 25 },
+	Keymaster = { name = "KEYMASTER", hp = 700, speed = 17, damage = 18, reward = 120, xp = 40, scale = 1.15,
+		color = Color3.fromRGB(255, 190, 50), unlockWave = 99, weight = 0, keys = 5 },
 	Master = { name = "MASTER KEIS", hp = 1500, speed = 10, damage = 35, reward = 150, xp = 60, scale = 1.3,
 		color = Color3.fromRGB(120, 20, 20), unlockWave = 99, weight = 0, boss = true,
 		summon = "Mini", summonEvery = 8, summonCount = 3 },
 }
+
+-- Wave modifiers (one may roll from wave 3) -----------------------------------------------
+Config.MODIFIER_FROM_WAVE = 3
+Config.MODIFIER_CHANCE = 0.6
+Config.Modifiers = {
+	Swarm = { name = "SWARM", desc = "+60% Keis, -30% health", count = 1.6, hp = 0.7 },
+	Armored = { name = "ARMORED", desc = "Keis have +50% health", hp = 1.5 },
+	Frenzy = { name = "FRENZY", desc = "Keis are much faster", speed = 4 },
+	Darkness = { name = "DARKNESS", desc = "The lights are out", dark = true },
+	DoubleKeys = { name = "DOUBLE KEYS", desc = "Keis drop twice the keys", keys = 2 },
+	Bounty = { name = "BOUNTY", desc = "+75% credits from kills", credits = 1.75 },
+}
+
+-- Keys & crates ------------------------------------------------------------------------------------
+Config.KEY_DROP_CHANCE = 0.22 -- per kill (bosses and the Keymaster always drop several)
+Config.CRATES_PER_BREAK = 3
+Config.MISSION_KEY_REWARD = 2 -- keys for each crew member when a special mission succeeds
 
 -- Weapons ----------------------------------------------------------------------------------
 -- Shared settings
@@ -180,6 +199,7 @@ Config.Narration = {
 	GoldenEscaped = "The golden keis got away",
 	WaveClear = "Wave cleared. The keis are regrouping",
 	GameOver = "The incident was never reported",
+	Retreat = "The keis retreat into the vents. For now",
 	Landing = "The USS Kepler lands on Io. The keis followed the ship down",
 }
 

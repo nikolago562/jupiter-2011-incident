@@ -129,6 +129,7 @@ local function setOpen(open: boolean)
 		return
 	end
 	panel.Visible = open
+	player:SetAttribute("UIOpen", open)
 	if open then
 		panel.Size = UDim2.fromOffset(680, 500)
 		Theme.tween(panel, 0.2, { Size = UDim2.fromOffset(720, 530) }, Enum.EasingStyle.Back)
