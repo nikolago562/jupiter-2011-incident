@@ -17,6 +17,8 @@ Config.DOWNED_BLEEDOUT = 25 -- seconds a downed player has to be revived
 Config.REVIVE_TIME = 2.5 -- hold time to revive a crewmate
 Config.REVIVE_HEALTH = 0.4 -- revived with 40% health
 
+Config.SPACESUITS = true -- dress everyone in white spacesuits with helmets
+
 -- Reactor (the thing the Keis want) ---------------------------------------------
 Config.REACTOR_MAX_HP = 1000
 Config.REPAIR_COST = 60
@@ -50,26 +52,31 @@ Config.KeisTypes = {
 		color = Color3.fromRGB(225, 220, 200), unlockWave = 3, weight = 6 },
 	Keyring = { name = "KEYRING", hp = 90, speed = 11, damage = 10, reward = 8, xp = 3, scale = 1.1,
 		color = Color3.fromRGB(150, 160, 175), unlockWave = 4, weight = 4, splitInto = "Mini", splitCount = 3 },
-	Iron = { name = "IRON KEIS", hp = 220, speed = 9, damage = 22, reward = 15, xp = 5, scale = 1.45,
+	Iron = { name = "IRON KEIS", hp = 220, speed = 9, damage = 22, reward = 15, xp = 5, scale = 1.25,
 		color = Color3.fromRGB(70, 72, 80), unlockWave = 6, weight = 3 },
 	Mini = { name = "MINI KEIS", hp = 18, speed = 19, damage = 4, reward = 2, xp = 1, scale = 0.55,
 		color = Color3.fromRGB(200, 160, 80), unlockWave = 99, weight = 0 },
 	Golden = { name = "GOLDEN KEIS", hp = 80, speed = 17, damage = 0, reward = 60, xp = 20, scale = 0.9,
 		color = Color3.fromRGB(255, 200, 40), unlockWave = 1, weight = 0, passive = true, lifetime = 25 },
-	Master = { name = "MASTER KEIS", hp = 1500, speed = 10, damage = 35, reward = 150, xp = 60, scale = 2.6,
+	Master = { name = "MASTER KEIS", hp = 1500, speed = 10, damage = 35, reward = 150, xp = 60, scale = 1.3,
 		color = Color3.fromRGB(120, 20, 20), unlockWave = 99, weight = 0, boss = true,
 		summon = "Mini", summonEvery = 8, summonCount = 3 },
 }
 
--- Weapon ----------------------------------------------------------------------------------
+-- Weapons ----------------------------------------------------------------------------------
+-- Shared settings
 Config.Weapon = {
-	BaseDamage = 20,
-	FireInterval = 0.2,
-	MagSize = 15,
-	ReloadTime = 1.5,
 	Range = 220,
 	Spread = 0.05, -- radians between Split Beam shots
-	CritMultiplier = 2, -- hitting a Keis in the face
+	CritMultiplier = 2, -- hitting a Keis in the mouth
+	FireInterval = 0.2, -- fallback for the client before stats arrive
+}
+-- Everyone starts with the Blaster. The minigun is unlocked in the Upgrade Terminal.
+Config.Weapons = {
+	Blaster = { name = "BLASTER", damage = 20, interval = 0.2, mag = 15, magPerLevel = 5, reload = 1.5, jitter = 0,
+		tracer = Color3.fromRGB(90, 220, 255) },
+	Minigun = { name = "M-2011 MINIGUN", damage = 11, interval = 0.065, mag = 100, magPerLevel = 25, reload = 3.2, jitter = 0.035,
+		tracer = Color3.fromRGB(255, 170, 60), cost = 450 },
 }
 
 -- Upgrades (bought with credits; reset every run) ------------------------------------------------

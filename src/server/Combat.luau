@@ -11,6 +11,7 @@ local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local Combat = {}
 
 type State = {
+	weapon: string,
 	credits: number,
 	upgrades: { [string]: number },
 	ammo: number,
@@ -46,11 +47,13 @@ function Combat.stats(player: Player)
 	local up = if st then st.upgrades else {}
 	local data = PlayerData.get(player)
 	local level = if data then data.Level else 1
-	local W = Config.Weapon
+	local W = Config.Weapons[if st then st.weapon else "Blaster"] or Config.Weapons.Blaster
 	return {
-		damage = W.BaseDamage * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1)),
-		interval = W.FireInterval * (0.88 ^ (up.FireRate or 0)),
-		mag = W.MagSize + 5 * (up.Mag or 0),
+		damage = W.damage * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1)),
+		interval = W.interval * (0.88 ^ (up.FireRate or 0)),
+		mag = W.mag + W.magPerLevel * (up.Mag or 0),
+		reload = W.reload,
+		jitter = W.jitter,
 		pellets = 1 + (up.Multishot or 0),
 		maxHealth = Config.BASE_HEALTH + 25 * (up.MaxHealth or 0),
 		walkSpeed = Config.BASE_WALKSPEED + 1.5 * (up.Speed or 0),
@@ -64,6 +67,7 @@ local function publish(player: Player)
 	end
 	local s = Combat.stats(player)
 	player:SetAttribute("Credits", st.credits)
+	player:SetAttribute("Weapon", st.weapon)
 	player:SetAttribute("Ammo", st.ammo)
 	player:SetAttribute("MagSize", s.mag)
 	player:SetAttribute("Reloading", st.reloading)
@@ -76,9 +80,10 @@ end
 
 function Combat.reset(player: Player)
 	states[player] = {
+		weapon = "Blaster",
 		credits = 0,
 		upgrades = {},
-		ammo = Config.Weapon.MagSize,
+		ammo = Config.Weapons.Blaster.mag,
 		reloading = false,
 		lastShot = 0,
 		kills = 0,
@@ -115,22 +120,25 @@ function Combat.addKill(player: Player)
 	end
 end
 
-local function makeBlaster(): Tool
+local function makeWeapon(weaponId: string): Tool
 	local tool = Instance.new("Tool")
-	tool.Name = "Blaster"
+	tool.Name = if weaponId == "Minigun" then "Minigun" else "Blaster"
 	tool.ToolTip = "Hold to fire · R to reload"
 	tool.CanBeDropped = false
-	tool.Grip = CFrame.new(0, -0.2, 0.4)
+	tool:SetAttribute("IsWeapon", true)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
 	handle.Size = Vector3.new(0.45, 1, 0.7)
-	handle.Color = Color3.fromRGB(230, 232, 238)
-	handle.Material = Enum.Material.SmoothPlastic
+	handle.Color = Color3.fromRGB(60, 60, 64)
+	handle.Material = Enum.Material.Metal
 	handle.CanCollide = false
 	handle.Parent = tool
-	local function attach(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material)
+	local function attach(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material, shape: Enum.PartType?)
 		local p = Instance.new("Part")
 		p.Name = name
+		if shape then
+			p.Shape = shape
+		end
 		p.Size = size
 		p.Color = color
 		p.Material = material
@@ -143,10 +151,58 @@ local function makeBlaster(): Tool
 		w.Part1 = p
 		w.Parent = p
 	end
-	attach("Body", Vector3.new(0.6, 0.6, 2), CFrame.new(0, 0.6, -0.6), Color3.fromRGB(230, 232, 238), Enum.Material.SmoothPlastic)
-	attach("Stripe", Vector3.new(0.62, 0.15, 1.6), CFrame.new(0, 0.75, -0.6), Color3.fromRGB(255, 138, 61), Enum.Material.Neon)
-	attach("Muzzle", Vector3.new(0.4, 0.4, 0.3), CFrame.new(0, 0.6, -1.75), Color3.fromRGB(90, 220, 255), Enum.Material.Neon)
+	if weaponId == "Minigun" then
+		tool.Grip = CFrame.new(0, -0.3, 0.9)
+		local gunmetal = Color3.fromRGB(45, 46, 50)
+		attach("Body", Vector3.new(1, 1, 2.2), CFrame.new(0, 0.6, -0.9), gunmetal, Enum.Material.Metal)
+		-- six rotating-style barrels around a hub
+		for i = 0, 5 do
+			local a = i / 6 * math.pi * 2
+			attach("Barrel", Vector3.new(3.2, 0.22, 0.22), CFrame.new(math.cos(a) * 0.32, 0.6 + math.sin(a) * 0.32, -3.3) * CFrame.Angles(0, math.rad(90), 0),
+				Color3.fromRGB(70, 70, 74), Enum.Material.Metal, Enum.PartType.Cylinder)
+		end
+		attach("Hub", Vector3.new(0.3, 1, 1), CFrame.new(0, 0.6, -2.2) * CFrame.Angles(0, math.rad(90), 0), gunmetal, Enum.Material.Metal, Enum.PartType.Cylinder)
+		attach("Drum", Vector3.new(0.9, 1.1, 1.1), CFrame.new(0.75, 0.3, -0.6) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(150, 120, 60), Enum.Material.Metal, Enum.PartType.Cylinder)
+		attach("Stripe", Vector3.new(1.02, 0.15, 1.8), CFrame.new(0, 1.05, -0.9), Color3.fromRGB(255, 138, 61), Enum.Material.Neon)
+		attach("Muzzle", Vector3.new(0.3, 0.3, 0.2), CFrame.new(0, 0.6, -4.95), Color3.fromRGB(255, 170, 60), Enum.Material.Neon)
+	else
+		tool.Grip = CFrame.new(0, -0.2, 0.4)
+		attach("Body", Vector3.new(0.6, 0.6, 2), CFrame.new(0, 0.6, -0.6), Color3.fromRGB(230, 232, 238), Enum.Material.SmoothPlastic)
+		attach("Stripe", Vector3.new(0.62, 0.15, 1.6), CFrame.new(0, 0.75, -0.6), Color3.fromRGB(255, 138, 61), Enum.Material.Neon)
+		attach("Muzzle", Vector3.new(0.4, 0.4, 0.3), CFrame.new(0, 0.6, -1.75), Color3.fromRGB(90, 220, 255), Enum.Material.Neon)
+	end
 	return tool
+end
+
+local function findWeapon(container: Instance?): Tool?
+	if not container then
+		return nil
+	end
+	for _, t in container:GetChildren() do
+		if t:IsA("Tool") and t:GetAttribute("IsWeapon") then
+			return t
+		end
+	end
+	return nil
+end
+
+local function giveWeapon(player: Player, humanoid: Humanoid)
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	for _, container in { backpack, player.Character } do
+		local old = findWeapon(container)
+		while old do
+			old:Destroy()
+			old = findWeapon(container)
+		end
+	end
+	local st = states[player]
+	local tool = makeWeapon(if st then st.weapon else "Blaster")
+	tool.Parent = backpack
+	task.defer(function()
+		if humanoid.Parent and not player:GetAttribute("Downed") then
+			humanoid:EquipTool(tool)
+		end
+	end)
 end
 
 function Combat.applyCharacter(player: Player, character: Model)
@@ -164,15 +220,9 @@ function Combat.applyCharacter(player: Player, character: Model)
 	st.ammo = s.mag
 	st.reloading = false
 	publish(player)
-	local backpack = player:WaitForChild("Backpack", 5)
-	if backpack and humanoid then
-		local tool = makeBlaster()
-		tool.Parent = backpack
-		task.defer(function()
-			if humanoid.Parent then
-				humanoid:EquipTool(tool)
-			end
-		end)
+	player:WaitForChild("Backpack", 5)
+	if humanoid then
+		giveWeapon(player, humanoid)
 	end
 end
 
@@ -184,7 +234,7 @@ local function startReload(player: Player)
 	st.reloading = true
 	publish(player)
 	;(remotes:FindFirstChild("CrewAction") :: RemoteEvent):FireAllClients(player.UserId, "Reloading!!")
-	task.delay(Config.Weapon.ReloadTime, function()
+	task.delay(Combat.stats(player).reload, function()
 		if states[player] == st then
 			st.ammo = Combat.stats(player).mag
 			st.reloading = false
@@ -203,7 +253,7 @@ local function onShoot(player: Player, aimPos: any)
 	end
 	local character = player.Character
 	local head = character and character:FindFirstChild("Head") :: BasePart?
-	local tool = character and character:FindFirstChild("Blaster")
+	local tool = findWeapon(character)
 	if not character or not head or not tool then
 		return
 	end
@@ -238,9 +288,13 @@ local function onShoot(player: Player, aimPos: any)
 	local hits = {}
 	for i = 1, s.pellets do
 		local dir = baseDir
+		if s.jitter > 0 then
+			dir = (CFrame.fromAxisAngle(Vector3.yAxis, (math.random() - 0.5) * s.jitter)
+				* CFrame.fromAxisAngle(Vector3.xAxis, (math.random() - 0.5) * s.jitter) * dir).Unit
+		end
 		if s.pellets > 1 then
 			local angle = (i - (s.pellets + 1) / 2) * Config.Weapon.Spread
-			dir = (CFrame.fromAxisAngle(Vector3.yAxis, angle) * baseDir)
+			dir = (CFrame.fromAxisAngle(Vector3.yAxis, angle) * dir)
 		end
 		local result = workspace:Raycast(origin, dir * Config.Weapon.Range, params)
 		local hitPos = if result then result.Position else origin + dir * Config.Weapon.Range
@@ -270,6 +324,23 @@ local function onBuy(player: Player, id: any)
 		return
 	end
 	local st = states[player]
+	if id == "Minigun" then
+		local cost = Config.Weapons.Minigun.cost
+		if st and st.weapon ~= "Minigun" and st.credits >= cost then
+			st.credits -= cost
+			st.weapon = "Minigun"
+			st.reloading = false
+			st.ammo = Combat.stats(player).mag
+			local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				giveWeapon(player, humanoid)
+			end
+			publish(player)
+			;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, id)
+			;(remotes:FindFirstChild("CrewAction") :: RemoteEvent):FireAllClients(player.UserId, "I GOT A MINIGUN")
+		end
+		return
+	end
 	local def = upgradeDef(id)
 	if not st or not def then
 		return

@@ -40,45 +40,63 @@ local function weldTo(root: BasePart, p: BasePart)
 	w.Parent = p
 end
 
-local function drawFace(faceGui: SurfaceGui, boss: boolean)
-	local skin = Instance.new("Frame")
-	skin.Size = UDim2.fromScale(1, 1)
-	skin.BackgroundColor3 = if boss then Color3.fromRGB(150, 110, 100) else Color3.fromRGB(196, 160, 130)
-	skin.Parent = faceGui
-	Instance.new("UICorner", skin).CornerRadius = UDim.new(0.5, 0)
+-- the "face": a ring of teeth around a fleshy throat inside the key's bow
+local function drawMouth(faceGui: SurfaceGui, def: any)
+	local flesh = Instance.new("Frame")
+	flesh.Size = UDim2.fromScale(1, 1)
+	flesh.BackgroundColor3 = if def.passive then Color3.fromRGB(255, 190, 60) else Color3.fromRGB(120, 18, 22)
+	flesh.BorderSizePixel = 0
+	flesh.Parent = faceGui
+	Instance.new("UICorner", flesh).CornerRadius = UDim.new(0.5, 0)
 	if Config.KeisFaceImage ~= "" then
 		local img = Instance.new("ImageLabel")
 		img.Size = UDim2.fromScale(1, 1)
 		img.BackgroundTransparency = 1
 		img.Image = Config.KeisFaceImage
-		img.Parent = skin
+		img.Parent = flesh
 		Instance.new("UICorner", img).CornerRadius = UDim.new(0.5, 0)
 		return
 	end
-	local function blob(x: number, y: number, w: number, h: number, color: Color3)
-		local f = Instance.new("Frame")
-		f.AnchorPoint = Vector2.new(0.5, 0.5)
-		f.Position = UDim2.fromScale(x, y)
-		f.Size = UDim2.fromScale(w, h)
-		f.BackgroundColor3 = color
-		f.BorderSizePixel = 0
-		f.Parent = skin
-		Instance.new("UICorner", f).CornerRadius = UDim.new(0.5, 0)
+	local grad = Instance.new("UIGradient")
+	grad.Rotation = 90
+	grad.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(120, 120, 120))
+	grad.Parent = flesh
+	local throat = Instance.new("Frame")
+	throat.AnchorPoint = Vector2.new(0.5, 0.5)
+	throat.Position = UDim2.fromScale(0.5, 0.5)
+	throat.Size = UDim2.fromScale(0.5, 0.5)
+	throat.BackgroundColor3 = Color3.fromRGB(12, 2, 4)
+	throat.BorderSizePixel = 0
+	throat.Parent = flesh
+	Instance.new("UICorner", throat).CornerRadius = UDim.new(0.5, 0)
+	-- two rings of teeth pointing inward
+	local rings = if def.boss then { { r = 0.4, n = 18, len = 0.16 }, { r = 0.28, n = 14, len = 0.11 } } else { { r = 0.36, n = 14, len = 0.14 } }
+	for _, ring in rings do
+		for i = 1, ring.n do
+			local a = (i / ring.n) * math.pi * 2
+			local tooth = Instance.new("Frame")
+			tooth.AnchorPoint = Vector2.new(0.5, 0.5)
+			tooth.Position = UDim2.fromScale(0.5 + math.cos(a) * ring.r, 0.5 + math.sin(a) * ring.r)
+			tooth.Size = UDim2.fromScale(0.05, ring.len)
+			tooth.Rotation = math.deg(a) + 90
+			tooth.BackgroundColor3 = Color3.fromRGB(235, 228, 205)
+			tooth.BorderSizePixel = 0
+			tooth.Parent = flesh
+			local c = Instance.new("UICorner")
+			c.CornerRadius = UDim.new(0.5, 0)
+			c.Parent = tooth
+		end
 	end
-	blob(0.32, 0.36, 0.2, 0.15, Color3.new(1, 1, 1)) -- eyes (wide, staring)
-	blob(0.68, 0.36, 0.2, 0.15, Color3.new(1, 1, 1))
-	blob(0.33, 0.37, 0.08, 0.08, Color3.new(0.05, 0.05, 0.05))
-	blob(0.67, 0.37, 0.08, 0.08, Color3.new(0.05, 0.05, 0.05))
-	blob(0.5, 0.72, 0.6, 0.3, Color3.fromRGB(150, 70, 70)) -- big lips
-	blob(0.5, 0.72, 0.48, 0.07, Color3.fromRGB(40, 15, 15))
 end
+
+local LEG_COLOR = Color3.fromRGB(58, 52, 50)
 
 local function buildModel(def: any, position: Vector3)
 	local s = def.scale
 	local model = Instance.new("Model")
 	model.Name = def.name
 
-	local HIP = 1.5 * s
+	local HIP = 2.5 * s -- the spider legs hold the key up off the floor
 	local root = Instance.new("Part")
 	root.Name = "HumanoidRootPart"
 	root.Size = Vector3.new(2, 2, 1) * s
@@ -100,18 +118,20 @@ local function buildModel(def: any, position: Vector3)
 		p.Color = color
 		p.Material = mat
 		p.CFrame = root.CFrame * (offset - offset.Position + offset.Position * s)
+		p:SetAttribute("BaseColor", color)
 		p.Parent = model
 		weldTo(root, p)
 		return p
 	end
 
+	-- the key: shaft, bit (teeth) and bow
 	table.insert(bodyParts, piece("Shaft", Vector3.new(0.9, 5.5, 0.9), CFrame.new(0, 0.5, 0), def.color, material))
 	table.insert(bodyParts, piece("ToothA", Vector3.new(1.4, 0.7, 0.9), CFrame.new(0.9, -1.6, 0), def.color, material))
 	table.insert(bodyParts, piece("ToothB", Vector3.new(1.0, 0.7, 0.9), CFrame.new(0.7, -0.6, 0), def.color, material))
+	table.insert(bodyParts, piece("Collar", Vector3.new(0.6, 1.5, 1.5), CFrame.new(0, 2.9, 0) * CFrame.Angles(0, 0, math.rad(90)), def.color, material, Enum.PartType.Cylinder))
 	local bow = piece("Bow", Vector3.new(0.9, 4.8, 4.8), CFrame.new(0, 5.5, 0) * CFrame.Angles(0, math.rad(90), 0), def.color, material, Enum.PartType.Cylinder)
 	table.insert(bodyParts, bow)
 	if def.splitInto then
-		-- keyring: a ring with extra mini keys hanging off it
 		local ring = piece("Ring", Vector3.new(0.4, 3, 3), CFrame.new(0, 9, 0) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(200, 200, 210), Enum.Material.Metal, Enum.PartType.Cylinder)
 		table.insert(bodyParts, ring)
 		for i = -1, 1, 2 do
@@ -119,23 +139,81 @@ local function buildModel(def: any, position: Vector3)
 		end
 	end
 
+	-- the mouth inside the bow (named "Face": shots here are crits)
 	local face = piece("Face", Vector3.new(3.4, 3.4, 0.1), CFrame.new(0, 5.5, -0.5), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
 	face.Transparency = 1
 	local faceGui = Instance.new("SurfaceGui")
 	faceGui.Face = Enum.NormalId.Front
 	faceGui.CanvasSize = Vector2.new(200, 200)
-	faceGui.LightInfluence = 0.3
+	faceGui.LightInfluence = 0.5
 	faceGui.Parent = face
-	drawFace(faceGui, def.boss == true)
+	drawMouth(faceGui, def)
 
 	local glow = Instance.new("PointLight")
 	glow.Color = if def.passive then Color3.fromRGB(255, 210, 60) else Color3.fromRGB(255, 50, 40)
 	glow.Range = 10 * s
-	glow.Brightness = if def.boss then 4 else 1.5
+	glow.Brightness = if def.boss then 4 else 1.2
 	glow.Parent = face
 
+	-- six spider legs. Each leg hangs on a Motor6D ("Leg1".."Leg6") that clients animate (KeisAnimator).
+	local hipY = 0.6 -- relative to the root center, before scaling
+	local upperLen, upperAngle = 3.2, math.rad(40)
+	local kneeOut, kneeUp = math.cos(upperAngle) * upperLen, math.sin(upperAngle) * upperLen
+	local footOut = kneeOut + 1.3
+	local footDown = (HIP / s + 1 + hipY) -- from hip height down to the floor
+	local legIndex = 0
+	for _, side in { 1, -1 } do
+		for _, yawDeg in { -38, 0, 38 } do
+			legIndex += 1
+			local yaw = math.rad(yawDeg) + (if side == 1 then 0 else math.pi)
+			local hip = CFrame.new(0, hipY * s, 0) * CFrame.Angles(0, yaw, 0)
+
+			local upperLocal = CFrame.new(kneeOut / 2 * s, kneeUp / 2 * s, 0) * CFrame.Angles(0, 0, upperAngle)
+			local upper = Instance.new("Part")
+			upper.Name = "LegUpper"
+			upper.Size = Vector3.new(upperLen, 0.32, 0.32) * s
+			upper.Color = LEG_COLOR
+			upper.Material = Enum.Material.Metal
+			upper.CanCollide = false
+			upper.Massless = true
+			upper.CFrame = root.CFrame * hip * upperLocal
+			upper:SetAttribute("BaseColor", LEG_COLOR)
+			upper.Parent = model
+
+			local motor = Instance.new("Motor6D")
+			motor.Name = "Leg" .. legIndex
+			motor.Part0 = root
+			motor.Part1 = upper
+			motor.C0 = hip
+			motor.C1 = upperLocal:Inverse()
+			motor:SetAttribute("Group", legIndex % 2) -- tripod gait: legs alternate in two groups
+			motor.Parent = root
+
+			local knee = Vector3.new(kneeOut, kneeUp, 0) * s
+			local foot = Vector3.new(footOut, -footDown, 0) * s
+			local lowerVec = foot - knee
+			local lowerLocal = CFrame.lookAt(knee + lowerVec / 2, foot) -- Z axis along the leg
+			local lower = Instance.new("Part")
+			lower.Name = "LegLower"
+			lower.Size = Vector3.new(0.24 * s, 0.24 * s, lowerVec.Magnitude)
+			lower.Color = LEG_COLOR
+			lower.Material = Enum.Material.Metal
+			lower.CanCollide = false
+			lower.Massless = true
+			lower.CFrame = root.CFrame * hip * lowerLocal
+			lower:SetAttribute("BaseColor", LEG_COLOR)
+			lower.Parent = model
+			local w = Instance.new("WeldConstraint")
+			w.Part0 = upper
+			w.Part1 = lower
+			w.Parent = lower
+			table.insert(bodyParts, upper)
+			table.insert(bodyParts, lower)
+		end
+	end
+
 	local humanoid = Instance.new("Humanoid")
-	humanoid.RigType = Enum.HumanoidRigType.R15 -- R15 uses HipHeight, so a legless key still stands up
+	humanoid.RigType = Enum.HumanoidRigType.R15 -- R15 uses HipHeight (the legs are only visual)
 	humanoid.HipHeight = HIP
 	humanoid.WalkSpeed = def.speed
 	humanoid.MaxHealth = math.huge
@@ -159,7 +237,7 @@ local function buildModel(def: any, position: Vector3)
 	local chant = Instance.new("TextLabel")
 	chant.Size = UDim2.new(1, 0, 0, 22)
 	chant.BackgroundTransparency = 1
-	chant.Font = Enum.Font.Arcade
+	chant.Font = Enum.Font.Code
 	chant.TextScaled = true
 	chant.TextColor3 = if def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 70, 60)
 	chant.TextStrokeTransparency = 0.3
@@ -320,7 +398,7 @@ function Keis:takeDamage(amount: number, killer: Player?): boolean
 	task.delay(0.07, function()
 		for _, p in self.bodyParts do
 			if p.Parent then
-				p.Color = if p.Name == "Ring" then Color3.fromRGB(200, 200, 210) else self.def.color
+				p.Color = (p:GetAttribute("BaseColor") :: Color3?) or self.def.color
 			end
 		end
 	end)

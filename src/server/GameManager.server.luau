@@ -11,6 +11,7 @@ local ShipBuilder = require(script.Parent:WaitForChild("ShipBuilder"))
 local Keis = require(script.Parent:WaitForChild("KeisAI"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local Combat = require(script.Parent:WaitForChild("Combat"))
+local Suit = require(script.Parent:WaitForChild("Suit"))
 
 -- Remotes ---------------------------------------------------------------------------------
 local remotes = Instance.new("Folder")
@@ -192,7 +193,14 @@ local function revive(player: Player, by: Player?)
 		prompt:Destroy()
 	end
 	local backpack = player:FindFirstChildOfClass("Backpack")
-	local tool = backpack and backpack:FindFirstChild("Blaster") :: Tool?
+	local tool: Tool? = nil
+	if backpack then
+		for _, t in backpack:GetChildren() do
+			if t:IsA("Tool") and t:GetAttribute("IsWeapon") then
+				tool = t
+			end
+		end
+	end
 	if tool then
 		humanoid:EquipTool(tool)
 	end
@@ -299,6 +307,11 @@ local function onPlayerAdded(player: Player)
 	Combat.reset(player)
 	player.CharacterAdded:Connect(function(character)
 		onCharacter(player, character)
+	end)
+	player.CharacterAppearanceLoaded:Connect(function(character)
+		if Config.SPACESUITS then
+			Suit.apply(character)
+		end
 	end)
 	player:LoadCharacter()
 end

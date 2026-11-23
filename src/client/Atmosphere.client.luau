@@ -16,7 +16,8 @@ local player = Players.LocalPlayer
 local rng = Random.new()
 
 -- Color grade ---------------------------------------------------------------------------------------
-local cc = make("ColorCorrectionEffect", { Saturation = 0.05, Contrast = 0.12, TintColor = Color3.fromRGB(255, 244, 232), Parent = Lighting })
+local cc = make("ColorCorrectionEffect", { Saturation = -0.25, Contrast = 0.18, TintColor = Color3.fromRGB(236, 246, 240), Parent = Lighting })
+make("BlurEffect", { Size = 1.2, Parent = Lighting }) -- slightly soft, like a security camera
 make("BloomEffect", { Intensity = 0.9, Threshold = 0.9, Size = 28, Parent = Lighting })
 make("SunRaysEffect", { Intensity = 0.03, Spread = 0.6, Parent = Lighting })
 
@@ -49,13 +50,34 @@ for i = 0, 89 do
 		BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.92, Parent = scan })
 end
 
--- camcorder corner (top right, small)
-local rec = text({ Font = F.Mono, TextSize = 16, TextColor3 = C.Danger, TextXAlignment = Enum.TextXAlignment.Right,
-	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 16), Size = UDim2.fromOffset(300, 18), Text = "● REC", Parent = gui })
-local stamp = text({ Font = F.Meme, TextSize = 16, TextColor3 = C.Text, TextXAlignment = Enum.TextXAlignment.Right,
-	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 36), Size = UDim2.fromOffset(300, 18), Parent = gui })
-local camId = text({ Font = F.Meme, TextSize = 14, TextColor3 = C.Muted, TextXAlignment = Enum.TextXAlignment.Right,
-	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 56), Size = UDim2.fromOffset(300, 16), Text = "USS KEPLER // CAM 03", Parent = gui })
+-- security camera overlay (like the footage): timestamp + camera of the room you're in
+local stamp = text({ Font = Enum.Font.Code, TextSize = 22, TextColor3 = Color3.fromRGB(235, 235, 230), TextStrokeTransparency = 0.6,
+	Position = UDim2.fromOffset(16, 10), Size = UDim2.fromOffset(400, 24), Parent = gui })
+local camId = text({ Font = Enum.Font.Code, TextSize = 22, TextColor3 = Color3.fromRGB(235, 235, 230), TextStrokeTransparency = 0.6,
+	Position = UDim2.fromOffset(16, 34), Size = UDim2.fromOffset(400, 24), Text = "CAM 01 (BRIDGE)", Parent = gui })
+local rec = text({ Font = Enum.Font.Code, TextSize = 22, TextColor3 = Color3.fromRGB(235, 235, 230), TextXAlignment = Enum.TextXAlignment.Right,
+	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 10), Size = UDim2.fromOffset(200, 24), RichText = true,
+	Text = 'REC <font color="#F0463C">●</font>', Parent = gui })
+
+-- which room is the local player in? (rooms carry Center/Size/Cam attributes)
+local currentCam = "CAM 01 (BRIDGE)"
+task.spawn(function()
+	while true do
+		local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local ship = workspace:FindFirstChild("Ship")
+		if hrp and ship then
+			for _, room in ship:GetChildren() do
+				local center = room:GetAttribute("Center") :: Vector3?
+				local size = room:GetAttribute("Size") :: Vector2?
+				if center and size and math.abs(hrp.Position.X - center.X) <= size.X / 2 and math.abs(hrp.Position.Z - center.Z) <= size.Y / 2 then
+					currentCam = (room:GetAttribute("Cam") :: string?) or currentCam
+					break
+				end
+			end
+		end
+		task.wait(0.3)
+	end
+end)
 
 -- static specks (only near Keis)
 local specks = {}
@@ -98,14 +120,14 @@ end
 RunService.RenderStepped:Connect(function(dt)
 	local now = os.clock()
 	local secs = (BASE + math.floor(now - start)) % 86400
-	stamp.Text = string.format("2011-07-14  %02d:%02d:%02d", secs // 3600, (secs // 60) % 60, secs % 60)
+	stamp.Text = string.format("07/14/2011 %02d:%02d:%02d", secs // 3600, (secs // 60) % 60, secs % 60)
 	rec.Visible = (now % 1.2) < 0.8
 
 	local powerOut = ReplicatedStorage:GetAttribute("PowerOut") == true
 	local alarm = ReplicatedStorage:GetAttribute("Alarm") == true
 
 	-- static ramps up as a Keis closes in (light, this is semi-horror)
-	local target = math.clamp(1 - (nearestKeis() - 6) / 30, 0, 1) * 0.6
+	local target = 0.12 + math.clamp(1 - (nearestKeis() - 6) / 30, 0, 1) * 0.5 -- constant light grain + more near a Keis
 	danger += (target - danger) * math.min(dt * 5, 1)
 	local count = math.floor(#specks * danger)
 	for i, s in specks do
@@ -120,7 +142,7 @@ RunService.RenderStepped:Connect(function(dt)
 			s.Visible = false
 		end
 	end
-	camId.Text = if danger > 0.3 and rng:NextNumber() < 0.04 then "USS KEPLER // KEIS KEIS KEIS" else "USS KEPLER // CAM 03"
+	camId.Text = if danger > 0.4 and rng:NextNumber() < 0.03 then "CAM ?? (KEIS KEIS KEIS)" else currentCam
 
 	-- grading
 	local pulse = if alarm then (math.sin(now * 4) + 1) / 2 else 0
@@ -131,6 +153,6 @@ RunService.RenderStepped:Connect(function(dt)
 		alarmSound.Volume = if alarm then 0.15 else 0
 	end
 	cc.Brightness = if powerOut then -0.12 else 0
-	cc.Saturation = if powerOut then -0.45 else 0.05 - danger * 0.3
-	cc.TintColor = if powerOut then Color3.fromRGB(200, 210, 255) else Color3.fromRGB(255, 244 - math.floor(danger * 60), 232 - math.floor(danger * 80))
+	cc.Saturation = if powerOut then -0.6 else -0.25 - danger * 0.3
+	cc.TintColor = if powerOut then Color3.fromRGB(200, 215, 255) else Color3.fromRGB(236, 246 - math.floor(danger * 60), 240 - math.floor(danger * 80))
 end)

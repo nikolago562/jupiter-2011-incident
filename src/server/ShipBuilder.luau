@@ -15,9 +15,9 @@ local ShipBuilder = {}
 local H = 16 -- ceiling height
 local DOOR_W, DOOR_H = 10, 11
 
-local HULL = Color3.fromRGB(205, 208, 214)
+local HULL = Color3.fromRGB(150, 154, 156)
 local HULL_DARK = Color3.fromRGB(62, 66, 76)
-local FLOOR = Color3.fromRGB(48, 50, 58)
+local FLOOR = Color3.fromRGB(56, 58, 60)
 local TRIM = Color3.fromRGB(255, 138, 61)
 local GLASS = Color3.fromRGB(150, 200, 255)
 
@@ -59,17 +59,71 @@ local function light(parent: BasePart, color: Color3, range: number, brightness:
 end
 
 type Hole = { side: string, offset: number, width: number, kind: string, bottom: number?, top: number? }
-type RoomDef = { name: string, center: Vector3, size: Vector2, holes: { Hole } }
+type RoomDef = { name: string, code: string, cam: string, center: Vector3, size: Vector2, holes: { Hole } }
+
+local HAZARD_Y = Color3.fromRGB(230, 180, 30)
+local PIPE = Color3.fromRGB(96, 92, 86)
+local GRATE = Color3.fromRGB(24, 25, 28)
+local RIB = Color3.fromRGB(120, 124, 128)
+
+local function hazardPost(parent: Instance, size: Vector3, cf: CFrame)
+	-- yellow/black striped post (stacked bands)
+	local bands = math.max(2, math.floor(size.Y / 1.2))
+	local h = size.Y / bands
+	for i = 0, bands - 1 do
+		deco(parent, Vector3.new(size.X, h, size.Z), cf * CFrame.new(0, -size.Y / 2 + h * (i + 0.5), 0),
+			if i % 2 == 0 then HAZARD_Y else Color3.fromRGB(20, 20, 20), Enum.Material.SmoothPlastic)
+	end
+end
+
+local function sectorLabel(parent: Instance, cf: CFrame, code: string)
+	local board = deco(parent, Vector3.new(7, 4.5, 0.05), cf, Color3.new(0, 0, 0))
+	board.Transparency = 1
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(350, 225)
+	sg.LightInfluence = 1
+	sg.Parent = board
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.fromScale(1, 1)
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.GothamBlack
+	l.TextScaled = true
+	l.TextColor3 = Color3.fromRGB(225, 222, 210)
+	l.TextTransparency = 0.15
+	l.Text = code
+	l.Parent = sg
+end
 
 local function buildRoom(parent: Instance, def: RoomDef): Folder
 	local folder = Instance.new("Folder")
 	folder.Name = def.name
+	folder:SetAttribute("Center", def.center)
+	folder:SetAttribute("Size", def.size)
+	folder:SetAttribute("Cam", def.cam)
 	folder.Parent = parent
 	local c, sx, sz = def.center, def.size.X, def.size.Y
 
 	part(folder, Vector3.new(sx, 1, sz), CFrame.new(c + Vector3.new(0, -0.5, 0)), FLOOR, Enum.Material.DiamondPlate, "Floor")
 	part(folder, Vector3.new(sx, 1, sz), CFrame.new(c + Vector3.new(0, H + 0.5, 0)), HULL_DARK, Enum.Material.Metal, "Ceiling")
 
+	-- floor grate strip down the long axis (dark slats, like the corridor in the footage)
+	local alongXFloor = sx >= sz
+	local runLen = (if alongXFloor then sx else sz) - 4
+	local slats = math.floor(runLen / 1.3)
+	for i = 0, slats - 1 do
+		local t = -runLen / 2 + (i + 0.5) * (runLen / slats)
+		local size = if alongXFloor then Vector3.new(0.8, 0.06, 6) else Vector3.new(6, 0.06, 0.8)
+		local pos = if alongXFloor then c + Vector3.new(t, 0.03, 0) else c + Vector3.new(0, 0.03, t)
+		deco(folder, size, CFrame.new(pos), GRATE, Enum.Material.Metal)
+	end
+	for _, edge in { -3.4, 3.4 } do
+		local size = if alongXFloor then Vector3.new(runLen, 0.08, 0.4) else Vector3.new(0.4, 0.08, runLen)
+		local pos = if alongXFloor then c + Vector3.new(0, 0.04, edge) else c + Vector3.new(edge, 0.04, 0)
+		deco(folder, size, CFrame.new(pos), HAZARD_Y, Enum.Material.SmoothPlastic)
+	end
+
+	local labelPlaced = false
 	for _, side in { "N", "S", "E", "W" } do
 		local alongX = side == "N" or side == "S"
 		local length = if alongX then sx else sz
@@ -77,20 +131,29 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 			elseif side == "S" then c.Z + sz / 2 - 0.5
 			elseif side == "E" then c.X + sx / 2 - 0.5
 			else c.X - sx / 2 + 0.5
+		local inward = if side == "N" then Vector3.new(0, 0, 1) elseif side == "S" then Vector3.new(0, 0, -1)
+			elseif side == "E" then Vector3.new(-1, 0, 0) else Vector3.new(1, 0, 0)
 
+		local function at(t: number, y: number, depth: number): Vector3
+			local base = if alongX then Vector3.new(c.X + t, c.Y + y, fixed) else Vector3.new(fixed, c.Y + y, c.Z + t)
+			return base + inward * depth
+		end
 		local function slab(a: number, b: number, y0: number, y1: number, color: Color3, material: Enum.Material, transparency: number?)
 			if b - a < 0.05 or y1 - y0 < 0.05 then
 				return
 			end
-			local mid, len, hgt = (a + b) / 2, b - a, y1 - y0
+			local len, hgt = b - a, y1 - y0
 			local size = if alongX then Vector3.new(len, hgt, 1) else Vector3.new(1, hgt, len)
-			local pos = if alongX then Vector3.new(c.X + mid, c.Y + y0 + hgt / 2, fixed) else Vector3.new(fixed, c.Y + y0 + hgt / 2, c.Z + mid)
-			local p = part(folder, size, CFrame.new(pos), color, material)
+			local p = part(folder, size, CFrame.new(at((a + b) / 2, y0 + hgt / 2, 0)), color, material)
 			if transparency then
 				p.Transparency = transparency
 				p.CastShadow = false
 				p.Name = "Window"
 			end
+		end
+		local function rib(t: number, height: number, color: Color3)
+			local size = if alongX then Vector3.new(0.9, height, 0.7) else Vector3.new(0.7, height, 0.9)
+			deco(folder, size, CFrame.new(at(t, height / 2, 0.75)), color, Enum.Material.Metal)
 		end
 
 		local holes = {}
@@ -111,32 +174,87 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 			slab(h.a, h.b, 0, h.bottom, HULL, Enum.Material.Metal)
 			slab(h.a, h.b, h.top, H, HULL, Enum.Material.Metal)
 			if h.kind == "window" then
-				slab(h.a, h.b, h.bottom, h.top, GLASS, Enum.Material.Glass, 0.75)
+				slab(h.a, h.b, h.bottom, h.top, GLASS, Enum.Material.Glass, 0.8)
+				-- heavy window frame
+				for _, t in { h.a, h.b } do
+					rib(t, H, RIB)
+				end
+				local sill = if alongX then Vector3.new(h.b - h.a, 0.6, 1.2) else Vector3.new(1.2, 0.6, h.b - h.a)
+				deco(folder, sill, CFrame.new(at((h.a + h.b) / 2, h.bottom - 0.3, 0.6)), RIB, Enum.Material.Metal)
+				deco(folder, sill, CFrame.new(at((h.a + h.b) / 2, h.top + 0.3, 0.6)), RIB, Enum.Material.Metal)
 			else
-				-- glowing door frame
-				slab(h.a, h.b, h.top, h.top + 0.4, TRIM, Enum.Material.Neon)
+				-- door frame with hazard stripes + a lit header
+				for _, t in { h.a - 0.45, h.b + 0.45 } do
+					local size = if alongX then Vector3.new(0.9, h.top, 1.4) else Vector3.new(1.4, h.top, 0.9)
+					hazardPost(folder, size, CFrame.new(at(t, h.top / 2, 0.7)))
+				end
+				local header = if alongX then Vector3.new(h.b - h.a + 1.8, 0.8, 1.4) else Vector3.new(1.4, 0.8, h.b - h.a + 1.8)
+				deco(folder, header, CFrame.new(at((h.a + h.b) / 2, h.top + 0.4, 0.7)), RIB, Enum.Material.Metal)
+				local lamp = if alongX then Vector3.new(2, 0.3, 0.2) else Vector3.new(0.2, 0.3, 2)
+				local l = deco(folder, lamp, CFrame.new(at((h.a + h.b) / 2, h.top + 0.4, 1.45)), Color3.fromRGB(255, 70, 50), Enum.Material.Neon)
+				light(l, Color3.fromRGB(255, 80, 60), 8, 0.6)
 			end
 			cursor = h.b
 		end
 		slab(cursor, length / 2, 0, H, HULL, Enum.Material.Metal)
 
-		-- orange floor trim along the wall
-		local trimSize = if alongX then Vector3.new(length, 0.3, 0.2) else Vector3.new(0.2, 0.3, length)
-		local inward = if side == "N" then Vector3.new(0, 0, 0.6) elseif side == "S" then Vector3.new(0, 0, -0.6)
-			elseif side == "E" then Vector3.new(-0.6, 0, 0) else Vector3.new(0.6, 0, 0)
-		local trimPos = if alongX then Vector3.new(c.X, c.Y + 0.4, fixed) else Vector3.new(fixed, c.Y + 0.4, c.Z)
-		deco(folder, trimSize, CFrame.new(trimPos + inward), TRIM, Enum.Material.Neon)
+		-- ribs every ~8 studs where the wall is solid, plus darker inset panels
+		local t = -length / 2 + 4
+		while t < length / 2 - 3 do
+			local blocked = false
+			for _, h in holes do
+				if t > h.a - 1.5 and t < h.b + 1.5 then
+					blocked = true
+				end
+			end
+			local panelBlocked = t + 4 > length / 2 - 3
+			for _, h in holes do
+				if t + 4 > h.a - 3.5 and t + 4 < h.b + 3.5 then
+					panelBlocked = true
+				end
+			end
+			if not blocked then
+				rib(t, H, RIB)
+			end
+			if not panelBlocked then
+				local panel = if alongX then Vector3.new(5.5, 7, 0.15) else Vector3.new(0.15, 7, 5.5)
+				deco(folder, panel, CFrame.new(at(t + 4, 6, 0.55)), Color3.fromRGB(128, 132, 136), Enum.Material.Metal)
+			end
+			t += 8
+		end
+
+		-- pipes along the top of every wall
+		local pipeSize = Vector3.new(length - 2, 1, 1)
+		local pipeCf = CFrame.new(at(0, H - 1, 1.1)) * (if alongX then CFrame.new() else CFrame.Angles(0, math.rad(90), 0))
+		local pipe = deco(folder, pipeSize, pipeCf, PIPE, Enum.Material.Metal)
+		pipe.Shape = Enum.PartType.Cylinder
+		local pipe2 = deco(folder, Vector3.new(length - 2, 0.6, 0.6), pipeCf * CFrame.new(0, -1.1, 0), Color3.fromRGB(150, 70, 40), Enum.Material.Metal)
+		pipe2.Shape = Enum.PartType.Cylinder
+
+		-- sector label on the first wall with free space at its end
+		if not labelPlaced then
+			local freeFrom = -length / 2
+			for _, h in holes do
+				freeFrom = math.max(freeFrom, h.b)
+			end
+			if length / 2 - freeFrom >= 9 then
+				labelPlaced = true
+				local pos = at(length / 2 - 5, 8.5, 0.56)
+				sectorLabel(folder, CFrame.lookAt(pos, pos + inward), def.code)
+			end
+		end
 	end
 
-	-- ceiling light panels on a grid
-	local stepX = math.max(1, math.floor(sx / 18))
-	local stepZ = math.max(1, math.floor(sz / 18))
+	-- fluorescent tubes on a grid
+	local stepX = math.max(1, math.floor(sx / 14))
+	local stepZ = math.max(1, math.floor(sz / 14))
 	for i = 1, stepX do
 		for j = 1, stepZ do
 			local px = c.X - sx / 2 + (i - 0.5) * sx / stepX
 			local pz = c.Z - sz / 2 + (j - 0.5) * sz / stepZ
-			local panel = deco(folder, Vector3.new(5, 0.3, 2), CFrame.new(px, c.Y + H - 0.15, pz), Color3.fromRGB(235, 245, 255), Enum.Material.Neon)
-			light(panel, Color3.fromRGB(215, 230, 255), 28, 1.1, "ShipLight")
+			deco(folder, Vector3.new(7, 0.5, 1.4), CFrame.new(px, c.Y + H - 0.25, pz), HULL_DARK, Enum.Material.Metal)
+			local tube = deco(folder, Vector3.new(6, 0.25, 0.5), CFrame.new(px, c.Y + H - 0.55, pz), Color3.fromRGB(215, 235, 255), Enum.Material.Neon)
+			light(tube, Color3.fromRGB(200, 222, 255), 24, 0.95, "ShipLight")
 		end
 	end
 
@@ -215,52 +333,52 @@ function ShipBuilder.build(): ShipInfo
 	ship.Parent = workspace
 
 	local rooms: { RoomDef } = {
-		{ name = "Bridge", center = Vector3.new(85, 0, 0), size = Vector2.new(40, 44), holes = {
+		{ name = "Bridge", code = "A-1", cam = "CAM 01 (BRIDGE)", center = Vector3.new(85, 0, 0), size = Vector2.new(40, 44), holes = {
 			{ side = "W", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "E", offset = 0, width = 36, kind = "window", bottom = 2.5, top = 14 },
 			{ side = "S", offset = 0, width = 26, kind = "window" },
 			{ side = "N", offset = 0, width = 26, kind = "window" },
 		} },
-		{ name = "Corridor B", center = Vector3.new(45, 0, 0), size = Vector2.new(40, 14), holes = {
+		{ name = "Corridor B", code = "C-3", cam = "CAM 04 (CORRIDOR)", center = Vector3.new(45, 0, 0), size = Vector2.new(40, 14), holes = {
 			{ side = "E", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "W", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "S", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "N", offset = -10, width = 12, kind = "window" },
 			{ side = "N", offset = 10, width = 12, kind = "window" },
 		} },
-		{ name = "Medbay", center = Vector3.new(45, 0, 24), size = Vector2.new(34, 34), holes = {
+		{ name = "Medbay", code = "M-2", cam = "CAM 05 (MEDBAY)", center = Vector3.new(45, 0, 24), size = Vector2.new(34, 34), holes = {
 			{ side = "N", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "S", offset = 0, width = 26, kind = "window" },
 			{ side = "E", offset = 0, width = 20, kind = "window" },
 		} },
-		{ name = "Reactor", center = Vector3.new(0, 0, 0), size = Vector2.new(50, 50), holes = {
+		{ name = "Reactor", code = "R-0", cam = "CAM 02 (REACTOR)", center = Vector3.new(0, 0, 0), size = Vector2.new(50, 50), holes = {
 			{ side = "E", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "W", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "N", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "S", offset = 0, width = DOOR_W, kind = "door" },
 		} },
-		{ name = "Observation Deck", center = Vector3.new(0, 0, 45), size = Vector2.new(40, 40), holes = {
+		{ name = "Observation Deck", code = "O-6", cam = "CAM 07 (OBSERVATION)", center = Vector3.new(0, 0, 45), size = Vector2.new(40, 40), holes = {
 			{ side = "N", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "S", offset = 0, width = 36, kind = "window", bottom = 1.5, top = 14.5 },
 			{ side = "E", offset = 0, width = 30, kind = "window" },
 			{ side = "W", offset = 0, width = 30, kind = "window" },
 		} },
-		{ name = "Engine Room", center = Vector3.new(0, 0, -45), size = Vector2.new(40, 40), holes = {
+		{ name = "Engine Room", code = "E-5", cam = "CAM 06 (ENGINES)", center = Vector3.new(0, 0, -45), size = Vector2.new(40, 40), holes = {
 			{ side = "S", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "N", offset = 0, width = 20, kind = "window" },
 		} },
-		{ name = "Corridor A", center = Vector3.new(-45, 0, 0), size = Vector2.new(40, 14), holes = {
+		{ name = "Corridor A", code = "C-2", cam = "CAM 03 (CORRIDOR)", center = Vector3.new(-45, 0, 0), size = Vector2.new(40, 14), holes = {
 			{ side = "E", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "W", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "N", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "S", offset = -10, width = 12, kind = "window" },
 			{ side = "S", offset = 10, width = 12, kind = "window" },
 		} },
-		{ name = "Crew Quarters", center = Vector3.new(-45, 0, -24), size = Vector2.new(34, 34), holes = {
+		{ name = "Crew Quarters", code = "Q-4", cam = "CAM 08 (QUARTERS)", center = Vector3.new(-45, 0, -24), size = Vector2.new(34, 34), holes = {
 			{ side = "S", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "N", offset = 0, width = 22, kind = "window" },
 		} },
-		{ name = "Cargo Bay", center = Vector3.new(-90, 0, 0), size = Vector2.new(50, 50), holes = {
+		{ name = "Cargo Bay", code = "K-9", cam = "CAM 09 (CARGO BAY)", center = Vector3.new(-90, 0, 0), size = Vector2.new(50, 50), holes = {
 			{ side = "E", offset = 0, width = DOOR_W, kind = "door" },
 			{ side = "W", offset = 0, width = 30, kind = "window" },
 			{ side = "S", offset = 0, width = 24, kind = "window" },
@@ -299,7 +417,7 @@ function ShipBuilder.build(): ShipInfo
 	part(bf, Vector3.new(3, 1, 3), CFrame.new(84, 1.5, 0), HULL_DARK, Enum.Material.Metal)
 	part(bf, Vector3.new(0.6, 4, 3), CFrame.new(82.8, 3.5, 0), Color3.fromRGB(150, 40, 30), Enum.Material.Fabric)
 
-	local board = part(bf, Vector3.new(0.5, 9, 14), CFrame.new(66.4, 7, -14), Color3.fromRGB(10, 10, 14), Enum.Material.SmoothPlastic, "Leaderboard")
+	local board = part(bf, Vector3.new(0.5, 9, 14), CFrame.new(67.3, 7, -14), Color3.fromRGB(10, 10, 14), Enum.Material.SmoothPlastic, "Leaderboard")
 	local sg = Instance.new("SurfaceGui")
 	sg.Face = Enum.NormalId.Right
 	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
@@ -379,7 +497,7 @@ function ShipBuilder.build(): ShipInfo
 	sky.Parent = Lighting
 	Lighting.ClockTime = 0
 	Lighting.Brightness = 1
-	Lighting.Ambient = Color3.fromRGB(40, 40, 52)
+	Lighting.Ambient = Color3.fromRGB(30, 32, 36)
 	Lighting.OutdoorAmbient = Color3.fromRGB(170, 160, 150)
 	Lighting.EnvironmentDiffuseScale = 0.3
 	Lighting.EnvironmentSpecularScale = 0.5

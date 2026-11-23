@@ -30,7 +30,7 @@ Theme.Fonts = {
 	Heavy = Enum.Font.GothamBlack,
 	Body = Enum.Font.GothamMedium,
 	Bold = Enum.Font.GothamBold,
-	Meme = Enum.Font.Arcade,
+	Meme = Enum.Font.Code, -- terminal / security-camera text
 	Mono = Enum.Font.Code,
 }
 

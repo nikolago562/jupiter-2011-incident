@@ -74,11 +74,11 @@ end
 refreshWave()
 
 -- Crew roster (top left) — the TikTok "JUPITER INCIDENT (2011)" format --------------------------------
-local roster = Theme.panel({ Position = UDim2.fromOffset(14, 14), Size = UDim2.fromOffset(300, 60), AutomaticSize = Enum.AutomaticSize.Y, Parent = gui })
+local roster = Theme.panel({ Position = UDim2.fromOffset(14, 66), Size = UDim2.fromOffset(300, 60), AutomaticSize = Enum.AutomaticSize.Y, Parent = gui })
 make("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10), PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = roster })
 make("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = roster })
-text({ RichText = true, Font = F.Meme, TextSize = 22, Size = UDim2.new(1, 0, 0, 24), LayoutOrder = 0,
-	Text = 'JUPITER <font color="#F0463C">INCIDENT</font> (2011)', Parent = roster })
+text({ RichText = true, Font = F.Title, TextSize = 14, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = 0,
+	Text = 'CREW MANIFEST <font color="#96897F">· USS KEPLER</font>', Parent = roster })
 
 type Row = { frame: Frame, img: ImageLabel, name: TextLabel, line: TextLabel, action: string, until_: number }
 local rows: { [number]: Row } = {}
@@ -142,17 +142,17 @@ task.spawn(function()
 			if status == "dead" then
 				row.img.ImageTransparency = 0.6
 				row.name.TextColor3 = C.Muted
-				row.line.Text, row.line.TextColor3 = "*Deceased*", C.Muted
+				row.line.Text, row.line.TextColor3 = "DECEASED", C.Muted
 			elseif status == "downed" then
 				row.img.ImageColor3 = Color3.fromRGB(255, 110, 100)
-				row.line.Text, row.line.TextColor3 = "*Down · needs a revive*", C.Danger
+				row.line.Text, row.line.TextColor3 = "DOWN · NEEDS A REVIVE", C.Danger
 			elseif now < row.until_ then
 				row.line.Text, row.line.TextColor3 = row.action, C.Text
 			elseif keisNear(member.Character, 25) then
 				row.img.ImageColor3 = Color3.fromRGB(255, 150, 140)
-				row.line.Text, row.line.TextColor3 = "*Key entity approaches*", C.Danger
+				row.line.Text, row.line.TextColor3 = "KEY ENTITY APPROACHING", C.Danger
 			elseif ReplicatedStorage:GetAttribute("PowerOut") then
-				row.line.Text, row.line.TextColor3 = "*Silence*", C.Muted
+				row.line.Text, row.line.TextColor3 = "NO SIGNAL", C.Muted
 			else
 				row.line.Text, row.line.TextColor3 = `LV {member:GetAttribute("Level") or 1} · {member:GetAttribute("Title") or "CADET"}`, C.Accent
 			end
@@ -331,7 +331,7 @@ end)
 local downed = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(60, 0, 0), BackgroundTransparency = 0.55,
 	BorderSizePixel = 0, Visible = false, ZIndex = 20, Parent = gui })
 text({ Font = F.Meme, TextSize = 64, TextColor3 = C.Danger, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromOffset(800, 70), Text = "*KEY ENTITY APPROACHES*", ZIndex = 21, Parent = downed })
+	Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromOffset(800, 70), Text = "SUIT INTEGRITY CRITICAL", ZIndex = 21, Parent = downed })
 local downedSub = text({ Font = F.Title, TextSize = 18, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.52), Size = UDim2.fromOffset(800, 30), ZIndex = 21, Parent = downed })
 RunService.Heartbeat:Connect(function()
@@ -401,7 +401,7 @@ Remotes:WaitForChild("GameOver").OnClientEvent:Connect(function(summary: any)
 		text({ Font = F.Mono, TextSize = 14, TextColor3 = C.Cream, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(0, 162),
 			Size = UDim2.new(1, 0, 0, 36), Text = `{m.kills} KEIS\n{m.damage} DMG`, ZIndex = 32, Parent = cell })
 		text({ Font = F.Meme, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(0, 202), Size = UDim2.new(1, 0, 0, 18),
-			TextColor3 = if isMvp then C.Gold else C.Muted, Text = if isMvp then "THE TRUE SURVIVOR" else "*Deceased*", ZIndex = 32, Parent = cell })
+			TextColor3 = if isMvp then C.Gold else C.Muted, Text = if isMvp then "THE TRUE SURVIVOR" else "DECEASED", ZIndex = 32, Parent = cell })
 	end
 	over.Visible = true
 	over.BackgroundTransparency = 1

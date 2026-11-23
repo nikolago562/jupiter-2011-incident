@@ -32,7 +32,7 @@ local openBtn = make("TextButton", {
 }, { Theme.corner(8) })
 
 -- panel
-local panel = Theme.panel({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(720, 470),
+local panel = Theme.panel({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(720, 530),
 	Visible = false, Parent = gui })
 text({ Font = F.Title, TextSize = 24, Position = UDim2.fromOffset(22, 16), Size = UDim2.fromOffset(400, 30), Text = "UPGRADE TERMINAL", Parent = panel })
 text({ Font = F.Meme, TextSize = 14, TextColor3 = C.Muted, Position = UDim2.fromOffset(22, 46), Size = UDim2.fromOffset(400, 18),
@@ -76,6 +76,13 @@ repairBtn.MouseButton1Click:Connect(function()
 	Repair:FireServer()
 end)
 
+local MINIGUN = Config.Weapons.Minigun
+local minigunBtn = make("TextButton", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -72), Size = UDim2.new(1, -44, 0, 44),
+	BackgroundColor3 = C.Gold, Font = F.Title, TextSize = 14, TextColor3 = C.Bg, Text = "", Parent = panel }, { Theme.corner(8) })
+minigunBtn.MouseButton1Click:Connect(function()
+	Buy:FireServer("Minigun")
+end)
+
 local function refresh()
 	local money = player:GetAttribute("Credits") or 0
 	credits.Text = `◆ {money}`
@@ -97,6 +104,16 @@ local function refresh()
 			card.buy.TextColor3 = if afford then C.Bg else C.Muted
 		end
 	end
+	if player:GetAttribute("Weapon") == "Minigun" then
+		minigunBtn.Text = `{MINIGUN.name}  ·  EQUIPPED`
+		minigunBtn.BackgroundColor3 = Color3.fromRGB(60, 52, 66)
+		minigunBtn.TextColor3 = C.Muted
+	else
+		local afford = money >= MINIGUN.cost
+		minigunBtn.Text = `UNLOCK {MINIGUN.name}  ·  ◆ {MINIGUN.cost}`
+		minigunBtn.BackgroundColor3 = if afford then C.Gold else Color3.fromRGB(60, 52, 66)
+		minigunBtn.TextColor3 = if afford then C.Bg else C.Muted
+	end
 	local hp = ReplicatedStorage:GetAttribute("ReactorHP") or 0
 	local max = ReplicatedStorage:GetAttribute("ReactorMax") or 1
 	local canRepair = money >= Config.REPAIR_COST and hp < max
@@ -113,8 +130,8 @@ local function setOpen(open: boolean)
 	end
 	panel.Visible = open
 	if open then
-		panel.Size = UDim2.fromOffset(680, 440)
-		Theme.tween(panel, 0.2, { Size = UDim2.fromOffset(720, 470) }, Enum.EasingStyle.Back)
+		panel.Size = UDim2.fromOffset(680, 500)
+		Theme.tween(panel, 0.2, { Size = UDim2.fromOffset(720, 530) }, Enum.EasingStyle.Back)
 		refresh()
 	end
 end

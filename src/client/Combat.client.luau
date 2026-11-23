@@ -59,10 +59,25 @@ local firing = false
 local lastFire = 0
 local hooked: { [Tool]: boolean } = setmetatable({}, { __mode = "k" }) :: any
 
+local function weaponIn(container: Instance?): Tool?
+	if not container then
+		return nil
+	end
+	for _, t in container:GetChildren() do
+		if t:IsA("Tool") and t:GetAttribute("IsWeapon") then
+			return t
+		end
+	end
+	return nil
+end
+
 local function equippedBlaster(): Tool?
-	local character = player.Character
-	local tool = character and character:FindFirstChild("Blaster")
-	return if tool and tool:IsA("Tool") then tool else nil
+	return weaponIn(player.Character)
+end
+
+local function tracerColor(who: Player): Color3
+	local w = Config.Weapons[(who:GetAttribute("Weapon") :: string?) or "Blaster"]
+	return if w then w.tracer else C.Cyan
 end
 
 local function muzzlePos(): Vector3?
@@ -113,7 +128,7 @@ local function tryFire()
 	-- local tracer for instant feedback
 	local from = muzzlePos()
 	if from then
-		tracer(from, aim, C.Cyan)
+		tracer(from, aim, tracerColor(player))
 	end
 	Theme.playSound(Config.Sounds.Shoot, 0.35, 0.95 + math.random() * 0.1)
 	-- tiny recoil
@@ -139,12 +154,17 @@ end
 
 local function hookCharacter(character: Model)
 	character.ChildAdded:Connect(function(c)
-		if c:IsA("Tool") and c.Name == "Blaster" then
-			hookTool(c)
+		if c:IsA("Tool") then
+			-- attributes replicate with the tool, but give them a frame to be safe
+			task.defer(function()
+				if c:GetAttribute("IsWeapon") then
+					hookTool(c)
+				end
+			end)
 		end
 	end)
-	local existing = character:FindFirstChild("Blaster")
-	if existing and existing:IsA("Tool") then
+	local existing = weaponIn(character)
+	if existing then
 		hookTool(existing)
 	end
 end
@@ -182,6 +202,8 @@ RunService.RenderStepped:Connect(function()
 		ammoText.Text = `{ammo} / {player:GetAttribute("MagSize") or 0}`
 		ammoText.TextColor3 = if ammo <= 3 then C.Danger else C.Text
 	end
+	local w = Config.Weapons[(player:GetAttribute("Weapon") :: string?) or "Blaster"]
+	ammoSub.Text = `{if w then w.name else "BLASTER"} · [R] RELOAD`
 	if os.clock() > comboUntil and combo > 0 then
 		combo = 0
 		Theme.tween(comboLabel, 0.3, { TextTransparency = 1, TextStrokeTransparency = 1 })
@@ -194,16 +216,16 @@ Remotes:WaitForChild("ShotFx").OnClientEvent:Connect(function(shooter: Player, o
 		-- our extra Split Beam pellets (the first one was drawn locally already)
 		local from = muzzlePos() or origin
 		for i = 2, #hits do
-			tracer(from, hits[i], C.Cyan)
+			tracer(from, hits[i], tracerColor(player))
 		end
 		return
 	end
 	local character = shooter.Character
-	local tool = character and character:FindFirstChild("Blaster")
+	local tool = weaponIn(character)
 	local muzzle = tool and tool:FindFirstChild("Muzzle") :: BasePart?
 	local from = if muzzle then muzzle.Position else origin
 	for _, h in hits do
-		tracer(from, h, C.Accent)
+		tracer(from, h, tracerColor(shooter))
 	end
 end)
 
