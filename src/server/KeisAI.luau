@@ -1,80 +1,48 @@
 --!strict
--- The Keis: key-shaped entities that hunt the crew and chant "keis keis keis".
+-- The Keis: key-shaped entities with faces that chant "keis keis keis o algo o algo".
+-- They crawl out of the vents and go for the reactor, or for any crew member who gets close.
 
 local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
-
-local BRASS = Color3.fromRGB(176, 142, 66)
 
 local Keis = {}
 Keis.__index = Keis
 
-export type KeisOptions = {
-	position: Vector3,
-	cells: { Vector3 },
-	parent: Instance,
-	getSpeed: () -> number,
-	getTargets: () -> { Model },
-	onKill: (character: Model) -> (),
+-- Set by the GameManager -----------------------------------------------------------------
+Keis.registry = {} :: { [Model]: any }
+Keis.hooks = {
+	folder = nil :: Folder?,
+	reactor = nil :: BasePart?,
+	reactorRadius = 8,
+	roomCenters = {} :: { Vector3 },
+	speedBonus = 0,
+	getTargets = function(): { Model }
+		return {}
+	end,
+	onKilled = function(_keis: any, _killer: Player?) end,
+	onAttackPlayer = function(_keis: any, _character: Model, _damage: number) end,
+	onAttackReactor = function(_keis: any, _damage: number) end,
+	onSummon = function(_keis: any) end,
+	onExpired = function(_keis: any) end,
 }
 
-local function weldTo(root: BasePart, part: BasePart)
-	part.Anchored = false
-	part.CanCollide = false
-	part.Massless = true
+local function weldTo(root: BasePart, p: BasePart)
+	p.Anchored = false
+	p.CanCollide = false
+	p.Massless = true
 	local w = Instance.new("WeldConstraint")
 	w.Part0 = root
-	w.Part1 = part
-	w.Parent = part
+	w.Part1 = p
+	w.Parent = p
 end
 
-local function buildModel(position: Vector3): (Model, Humanoid, BasePart, TextLabel, BasePart)
-	local model = Instance.new("Model")
-	model.Name = "Keis"
-
-	local HIP = 2
-	local root = Instance.new("Part")
-	root.Name = "HumanoidRootPart"
-	root.Size = Vector3.new(2, 2, 1)
-	root.Transparency = 1
-	root.CFrame = CFrame.new(position + Vector3.new(0, HIP + 1, 0))
-	root.Parent = model
-	model.PrimaryPart = root
-
-	local function piece(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material, shape: Enum.PartType?): Part
-		local p = Instance.new("Part")
-		p.Name = name
-		if shape then
-			p.Shape = shape
-		end
-		p.Size = size
-		p.Color = color
-		p.Material = material
-		p.CFrame = root.CFrame * offset
-		p.Parent = model
-		weldTo(root, p)
-		return p
-	end
-
-	-- shaft + teeth
-	piece("Shaft", Vector3.new(0.9, 6.5, 0.9), CFrame.new(0, 0.75, 0), BRASS, Enum.Material.Metal)
-	piece("ToothA", Vector3.new(1.4, 0.8, 0.9), CFrame.new(0.9, -1.6, 0), BRASS, Enum.Material.Metal)
-	piece("ToothB", Vector3.new(1.0, 0.8, 0.9), CFrame.new(0.7, -0.4, 0), BRASS, Enum.Material.Metal)
-	-- the bow (ring head), facing forward
-	local bow = piece("Bow", Vector3.new(0.9, 5.5, 5.5), CFrame.new(0, 6.5, 0) * CFrame.Angles(0, math.rad(90), 0), BRASS, Enum.Material.Metal, Enum.PartType.Cylinder)
-	-- the face in the bow (like the meme keys). Uses Config.KeisFaceImage if set, otherwise a drawn face.
-	local eye = piece("Face", Vector3.new(3.6, 3.6, 0.1), CFrame.new(0, 6.5, -0.5), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
-	eye.Transparency = 1
-	local faceGui = Instance.new("SurfaceGui")
-	faceGui.Face = Enum.NormalId.Front
-	faceGui.LightInfluence = 0.4
-	faceGui.CanvasSize = Vector2.new(200, 200)
-	faceGui.Parent = eye
+local function drawFace(faceGui: SurfaceGui, boss: boolean)
 	local skin = Instance.new("Frame")
 	skin.Size = UDim2.fromScale(1, 1)
-	skin.BackgroundColor3 = Color3.fromRGB(196, 160, 130)
+	skin.BackgroundColor3 = if boss then Color3.fromRGB(150, 110, 100) else Color3.fromRGB(196, 160, 130)
 	skin.Parent = faceGui
 	Instance.new("UICorner", skin).CornerRadius = UDim.new(0.5, 0)
 	if Config.KeisFaceImage ~= "" then
@@ -84,159 +52,334 @@ local function buildModel(position: Vector3): (Model, Humanoid, BasePart, TextLa
 		img.Image = Config.KeisFaceImage
 		img.Parent = skin
 		Instance.new("UICorner", img).CornerRadius = UDim.new(0.5, 0)
-	else
-		local function blob(x: number, y: number, w: number, h: number, color: Color3)
-			local f = Instance.new("Frame")
-			f.AnchorPoint = Vector2.new(0.5, 0.5)
-			f.Position = UDim2.fromScale(x, y)
-			f.Size = UDim2.fromScale(w, h)
-			f.BackgroundColor3 = color
-			f.BorderSizePixel = 0
-			f.Parent = skin
-			Instance.new("UICorner", f).CornerRadius = UDim.new(0.5, 0)
+		return
+	end
+	local function blob(x: number, y: number, w: number, h: number, color: Color3)
+		local f = Instance.new("Frame")
+		f.AnchorPoint = Vector2.new(0.5, 0.5)
+		f.Position = UDim2.fromScale(x, y)
+		f.Size = UDim2.fromScale(w, h)
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.Parent = skin
+		Instance.new("UICorner", f).CornerRadius = UDim.new(0.5, 0)
+	end
+	blob(0.32, 0.36, 0.2, 0.15, Color3.new(1, 1, 1)) -- eyes (wide, staring)
+	blob(0.68, 0.36, 0.2, 0.15, Color3.new(1, 1, 1))
+	blob(0.33, 0.37, 0.08, 0.08, Color3.new(0.05, 0.05, 0.05))
+	blob(0.67, 0.37, 0.08, 0.08, Color3.new(0.05, 0.05, 0.05))
+	blob(0.5, 0.72, 0.6, 0.3, Color3.fromRGB(150, 70, 70)) -- big lips
+	blob(0.5, 0.72, 0.48, 0.07, Color3.fromRGB(40, 15, 15))
+end
+
+local function buildModel(def: any, position: Vector3)
+	local s = def.scale
+	local model = Instance.new("Model")
+	model.Name = def.name
+
+	local HIP = 1.5 * s
+	local root = Instance.new("Part")
+	root.Name = "HumanoidRootPart"
+	root.Size = Vector3.new(2, 2, 1) * s
+	root.Transparency = 1
+	root.CanCollide = true
+	root.CFrame = CFrame.new(position + Vector3.new(0, HIP + s, 0))
+	root.Parent = model
+	model.PrimaryPart = root
+
+	local material = if def.passive then Enum.Material.Neon else Enum.Material.Metal
+	local bodyParts: { BasePart } = {}
+	local function piece(name: string, size: Vector3, offset: CFrame, color: Color3, mat: Enum.Material, shape: Enum.PartType?): Part
+		local p = Instance.new("Part")
+		p.Name = name
+		if shape then
+			p.Shape = shape
 		end
-		blob(0.32, 0.36, 0.2, 0.14, Color3.new(0.05, 0.05, 0.05)) -- eyes
-		blob(0.68, 0.36, 0.2, 0.14, Color3.new(0.05, 0.05, 0.05))
-		blob(0.32, 0.36, 0.06, 0.06, Color3.fromRGB(255, 30, 30)) -- pupils
-		blob(0.68, 0.36, 0.06, 0.06, Color3.fromRGB(255, 30, 30))
-		blob(0.5, 0.72, 0.62, 0.3, Color3.fromRGB(120, 60, 60)) -- big lips
-		blob(0.5, 0.72, 0.5, 0.06, Color3.fromRGB(40, 15, 15))
+		p.Size = size * s
+		p.Color = color
+		p.Material = mat
+		p.CFrame = root.CFrame * (offset - offset.Position + offset.Position * s)
+		p.Parent = model
+		weldTo(root, p)
+		return p
 	end
 
+	table.insert(bodyParts, piece("Shaft", Vector3.new(0.9, 5.5, 0.9), CFrame.new(0, 0.5, 0), def.color, material))
+	table.insert(bodyParts, piece("ToothA", Vector3.new(1.4, 0.7, 0.9), CFrame.new(0.9, -1.6, 0), def.color, material))
+	table.insert(bodyParts, piece("ToothB", Vector3.new(1.0, 0.7, 0.9), CFrame.new(0.7, -0.6, 0), def.color, material))
+	local bow = piece("Bow", Vector3.new(0.9, 4.8, 4.8), CFrame.new(0, 5.5, 0) * CFrame.Angles(0, math.rad(90), 0), def.color, material, Enum.PartType.Cylinder)
+	table.insert(bodyParts, bow)
+	if def.splitInto then
+		-- keyring: a ring with extra mini keys hanging off it
+		local ring = piece("Ring", Vector3.new(0.4, 3, 3), CFrame.new(0, 9, 0) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(200, 200, 210), Enum.Material.Metal, Enum.PartType.Cylinder)
+		table.insert(bodyParts, ring)
+		for i = -1, 1, 2 do
+			table.insert(bodyParts, piece("Charm", Vector3.new(0.5, 2.2, 0.5), CFrame.new(i * 2.6, 6.6, 0) * CFrame.Angles(0, 0, math.rad(i * 25)), def.color, material))
+		end
+	end
+
+	local face = piece("Face", Vector3.new(3.4, 3.4, 0.1), CFrame.new(0, 5.5, -0.5), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
+	face.Transparency = 1
+	local faceGui = Instance.new("SurfaceGui")
+	faceGui.Face = Enum.NormalId.Front
+	faceGui.CanvasSize = Vector2.new(200, 200)
+	faceGui.LightInfluence = 0.3
+	faceGui.Parent = face
+	drawFace(faceGui, def.boss == true)
+
 	local glow = Instance.new("PointLight")
-	glow.Color = Color3.fromRGB(255, 20, 20)
-	glow.Range = 14
-	glow.Brightness = 3
-	glow.Parent = eye
+	glow.Color = if def.passive then Color3.fromRGB(255, 210, 60) else Color3.fromRGB(255, 50, 40)
+	glow.Range = 10 * s
+	glow.Brightness = if def.boss then 4 else 1.5
+	glow.Parent = face
 
 	local humanoid = Instance.new("Humanoid")
+	humanoid.RigType = Enum.HumanoidRigType.R15 -- R15 uses HipHeight, so a legless key still stands up
 	humanoid.HipHeight = HIP
-	humanoid.WalkSpeed = Config.KEIS_BASE_SPEED
+	humanoid.WalkSpeed = def.speed
 	humanoid.MaxHealth = math.huge
 	humanoid.Health = math.huge
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	humanoid.BreakJointsOnDeath = false
 	humanoid.Parent = model
-	for _, state in { Enum.HumanoidStateType.Dead, Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Seated } do
+	for _, state in { Enum.HumanoidStateType.Dead, Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll,
+		Enum.HumanoidStateType.Seated, Enum.HumanoidStateType.Climbing } do
 		humanoid:SetStateEnabled(state, false)
 	end
 
-	-- floating chant text
+	-- name, health bar, chant text
 	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(260, 50)
-	billboard.StudsOffset = Vector3.new(0, 3.5, 0)
-	billboard.MaxDistance = 70
-	billboard.AlwaysOnTop = false
+	billboard.Size = UDim2.fromOffset(170, 52)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 3.2 * s, 0)
+	billboard.MaxDistance = if def.boss then 200 else 90
 	billboard.Adornee = bow
+	billboard.LightInfluence = 0
 	billboard.Parent = model
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.TextColor3 = Color3.fromRGB(255, 40, 40)
-	text.TextStrokeTransparency = 0.3
-	text.Font = Enum.Font.Arcade
-	text.TextScaled = true
-	text.Text = "KEIS KEIS KEIS"
-	text.Parent = billboard
+	local chant = Instance.new("TextLabel")
+	chant.Size = UDim2.new(1, 0, 0, 22)
+	chant.BackgroundTransparency = 1
+	chant.Font = Enum.Font.Arcade
+	chant.TextScaled = true
+	chant.TextColor3 = if def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 70, 60)
+	chant.TextStrokeTransparency = 0.3
+	chant.Text = ""
+	chant.Parent = billboard
+	local barBack = Instance.new("Frame")
+	barBack.AnchorPoint = Vector2.new(0.5, 0)
+	barBack.Position = UDim2.new(0.5, 0, 0, 30)
+	barBack.Size = UDim2.new(if def.boss then 1 else 0.6, 0, 0, if def.boss then 10 else 6)
+	barBack.BackgroundColor3 = Color3.fromRGB(20, 15, 20)
+	barBack.BorderSizePixel = 0
+	barBack.Visible = def.boss == true
+	barBack.Parent = billboard
+	Instance.new("UICorner", barBack).CornerRadius = UDim.new(1, 0)
+	local barFill = Instance.new("Frame")
+	barFill.Size = UDim2.fromScale(1, 1)
+	barFill.BackgroundColor3 = if def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 90, 60)
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBack
+	Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
 
-	if Config.Sounds.KeisChant ~= "" then
-		local chant = Instance.new("Sound")
-		chant.Name = "Chant"
-		chant.SoundId = Config.Sounds.KeisChant
-		chant.Looped = true
-		chant.Volume = 1
-		chant.RollOffMaxDistance = 90
-		chant.RollOffMinDistance = 8
-		chant.RollOffMode = Enum.RollOffMode.InverseTapered
-		local pitch = Instance.new("PitchShiftSoundEffect")
-		pitch.Octave = 0.8
-		pitch.Parent = chant
-		local reverb = Instance.new("ReverbSoundEffect")
-		reverb.DecayTime = 4
-		reverb.Parent = chant
-		chant.Parent = root
-		chant:Play()
+	local chantId = if def.boss and Config.Sounds.BossChant ~= "" then Config.Sounds.BossChant else Config.Sounds.KeisChant
+	if chantId ~= "" and not def.passive then
+		local sound = Instance.new("Sound")
+		sound.Name = "Chant"
+		sound.SoundId = chantId
+		sound.Looped = true
+		sound.Volume = if def.boss then 1.6 else 0.7
+		sound.PlaybackSpeed = (if def.boss then 0.8 else 1) * (0.92 + math.random() * 0.16)
+		sound.RollOffMinDistance = 6
+		sound.RollOffMaxDistance = if def.boss then 160 else 70
+		sound.RollOffMode = Enum.RollOffMode.InverseTapered
+		sound.Parent = root
+		sound.TimePosition = math.random() * 2
+		sound:Play()
 	end
 
-	return model, humanoid, root, text, eye
+	return model, humanoid, root, face, bodyParts, chant, barBack, barFill
 end
 
-function Keis.new(opts: KeisOptions)
+function Keis.new(typeId: string, position: Vector3, hpScale: number)
+	local def = (Config.KeisTypes :: any)[typeId]
+	assert(def, "unknown Keis type " .. typeId)
 	local self = setmetatable({}, Keis)
-	local model, humanoid, root, text, eye = buildModel(opts.position)
+	local model, humanoid, root, face, bodyParts, chant, barBack, barFill = buildModel(def, position)
+	self.typeId = typeId
+	self.def = def
 	self.model = model
 	self.humanoid = humanoid
 	self.root = root
-	self.text = text
-	self.eye = eye
-	self.opts = opts
+	self.face = face
+	self.bodyParts = bodyParts
+	self.chant = chant
+	self.barBack = barBack
+	self.barFill = barFill
+	self.maxHp = def.hp * hpScale
+	self.hp = self.maxHp
 	self.alive = true
+	self.bornAt = os.clock()
+	self.lastAttack = 0
+	self.lastSummon = os.clock()
+	self.lastPath = 0
 	self.waypoints = nil :: { PathWaypoint }?
 	self.wpIndex = 1
-	self.lastPath = 0
-	self.lastKill = 0
-	self.stunnedUntil = 0
-	self.lastProgress = os.clock()
 	self.lastPos = root.Position
+	self.lastProgress = os.clock()
+	self.wanderGoal = nil :: Vector3?
 	self.path = PathfindingService:CreatePath({
-		AgentRadius = 2.2,
-		AgentHeight = 10,
+		AgentRadius = math.min(1.6 * def.scale, 3.5),
+		AgentHeight = math.min(10 * def.scale, 14),
 		AgentCanJump = false,
 		WaypointSpacing = 6,
 	})
 
-	model.Parent = opts.parent
+	model.Parent = Keis.hooks.folder or workspace
 	root:SetNetworkOwner(nil)
+	Keis.registry[model] = self
 
 	task.spawn(function()
+		task.wait(math.random() * 0.15)
 		while self.alive do
-			self:step()
-			task.wait(0.1)
+			local ok, err = pcall(self.step, self)
+			if not ok then
+				warn("[Keis] step error:", err)
+			end
+			task.wait(0.15)
 		end
 	end)
 	task.spawn(function()
 		local rng = Random.new()
 		while self.alive do
-			self.text.Text = Config.KeisChatter[rng:NextInteger(1, #Config.KeisChatter)]
-			self.text.Rotation = rng:NextNumber(-6, 6)
-			task.wait(rng:NextNumber(0.6, 2.2))
+			if def.boss or rng:NextNumber() < 0.45 then
+				self.chant.Text = Config.KeisChatter[rng:NextInteger(1, #Config.KeisChatter)]
+				self.chant.Rotation = rng:NextNumber(-5, 5)
+			else
+				self.chant.Text = ""
+			end
+			task.wait(rng:NextNumber(1, 2.6))
 		end
 	end)
-
 	return self
 end
 
-function Keis:findTarget(): (Model?, number)
-	local best, bestDist = nil, math.huge
-	for _, character in self.opts.getTargets() do
-		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		local hum = character:FindFirstChildOfClass("Humanoid")
-		if hrp and hum and hum.Health > 0 then
-			local d = (hrp.Position - self.root.Position).Magnitude
-			if d < bestDist and d <= Config.KEIS_HEARING_RANGE then
-				best, bestDist = character, d
-			end
+function Keis.fromPart(instance: Instance): any?
+	local node: Instance? = instance
+	while node and node ~= workspace do
+		if node:IsA("Model") and Keis.registry[node] then
+			return Keis.registry[node]
+		end
+		node = node.Parent
+	end
+	return nil
+end
+
+function Keis.countHostile(): number
+	local n = 0
+	for _, k in Keis.registry do
+		if k.alive and not k.def.passive then
+			n += 1
 		end
 	end
-	return best, bestDist
+	return n
 end
 
-function Keis:canSee(character: Model): boolean
-	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	if not hrp then
+function Keis.clearAll()
+	for _, k in Keis.registry do
+		k:destroy()
+	end
+	Keis.registry = {}
+end
+
+-- Damage ----------------------------------------------------------------------------------
+function Keis:takeDamage(amount: number, killer: Player?): boolean
+	if not self.alive then
 		return false
 	end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { self.model, character }
-	local from = self.root.Position + Vector3.new(0, 2, 0)
-	return workspace:Raycast(from, hrp.Position - from, params) == nil
+	self.hp -= amount
+	self.barBack.Visible = true
+	self.barFill.Size = UDim2.fromScale(math.clamp(self.hp / self.maxHp, 0, 1), 1)
+	-- hit flash
+	for _, p in self.bodyParts do
+		p.Color = Color3.new(1, 1, 1)
+	end
+	task.delay(0.07, function()
+		for _, p in self.bodyParts do
+			if p.Parent then
+				p.Color = if p.Name == "Ring" then Color3.fromRGB(200, 200, 210) else self.def.color
+			end
+		end
+	end)
+	if self.hp <= 0 then
+		self:die(killer)
+		return true
+	end
+	return false
 end
 
-function Keis:pathTo(position: Vector3)
+function Keis:die(killer: Player?)
+	if not self.alive then
+		return
+	end
+	self.alive = false
+	Keis.registry[self.model] = nil
+	Keis.hooks.onKilled(self, killer)
+
+	-- pop: shrink + fade, and a burst
+	local center = self.root.Position + Vector3.new(0, 4 * self.def.scale, 0)
+	local burst = Instance.new("Part")
+	burst.Shape = Enum.PartType.Ball
+	burst.Anchored = true
+	burst.CanCollide = false
+	burst.CanQuery = false
+	burst.Material = Enum.Material.Neon
+	burst.Color = if self.def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 120, 60)
+	burst.Size = Vector3.one * 2
+	burst.CFrame = CFrame.new(center)
+	burst.Parent = workspace
+	TweenService:Create(burst, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = Vector3.one * 9 * self.def.scale, Transparency = 1 }):Play()
+	task.delay(0.4, function()
+		burst:Destroy()
+	end)
+	for _, d in self.model:GetDescendants() do
+		if d:IsA("BasePart") then
+			TweenService:Create(d, TweenInfo.new(0.25), { Transparency = 1 }):Play()
+		end
+	end
+	local chant = self.root:FindFirstChild("Chant")
+	if chant then
+		chant:Destroy()
+	end
+	self.humanoid.WalkSpeed = 0
+	task.delay(0.3, function()
+		self.model:Destroy()
+	end)
+end
+
+function Keis:destroy()
+	self.alive = false
+	Keis.registry[self.model] = nil
+	self.model:Destroy()
+end
+
+-- Movement ----------------------------------------------------------------------------------
+function Keis:hasLineOfSight(pos: Vector3, ignore: Instance?): boolean
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local list: { Instance } = { Keis.hooks.folder or self.model }
+	if ignore then
+		table.insert(list, ignore)
+	end
+	params.FilterDescendantsInstances = list
+	local from = self.root.Position + Vector3.new(0, 1, 0)
+	local to = Vector3.new(pos.X, from.Y, pos.Z)
+	return workspace:Raycast(from, to - from, params) == nil
+end
+
+function Keis:pathTo(pos: Vector3)
 	self.lastPath = os.clock()
 	local ok = pcall(function()
-		self.path:ComputeAsync(self.root.Position, position)
+		self.path:ComputeAsync(self.root.Position, pos)
 	end)
 	if ok and self.path.Status == Enum.PathStatus.Success then
 		self.waypoints = self.path:GetWaypoints()
@@ -246,84 +389,121 @@ function Keis:pathTo(position: Vector3)
 	end
 end
 
-function Keis:kill(character: Model)
-	if os.clock() - self.lastKill < 1.5 then
+function Keis:moveTowards(pos: Vector3, ignore: Instance?)
+	local flat = Vector3.new(pos.X - self.root.Position.X, 0, pos.Z - self.root.Position.Z)
+	if flat.Magnitude < 45 and self:hasLineOfSight(pos, ignore) then
+		self.waypoints = nil
+		self.humanoid:MoveTo(pos)
 		return
 	end
-	self.lastKill = os.clock()
-	self.opts.onKill(character)
+	if self.waypoints == nil or os.clock() - self.lastPath > 1.2 then
+		self:pathTo(pos)
+	end
+	local wps = self.waypoints
+	if wps and self.wpIndex <= #wps then
+		local wp = wps[self.wpIndex]
+		self.humanoid:MoveTo(wp.Position)
+		local d = Vector3.new(wp.Position.X - self.root.Position.X, 0, wp.Position.Z - self.root.Position.Z)
+		if d.Magnitude < 3 * math.max(1, self.def.scale) then
+			self.wpIndex += 1
+		end
+	end
 end
 
 function Keis:step()
 	if not self.model.Parent then
 		self.alive = false
+		Keis.registry[self.model] = nil
 		return
 	end
-	local light = self.eye:FindFirstChildOfClass("PointLight")
-	if os.clock() < self.stunnedUntil then
-		self.humanoid:MoveTo(self.root.Position)
-		if light then
-			light.Enabled = math.random() < 0.3
-		end
-		return
-	elseif light then
-		light.Enabled = true
-	end
-	self.humanoid.WalkSpeed = self.opts.getSpeed()
+	local def = self.def
+	local hooks = Keis.hooks
+	self.humanoid.WalkSpeed = def.speed + (if def.passive then 0 else hooks.speedBonus)
 
-	-- unstick: if we haven't moved in a while, drop the path
+	-- unstick
 	if (self.root.Position - self.lastPos).Magnitude > 1 then
 		self.lastPos = self.root.Position
 		self.lastProgress = os.clock()
 	elseif os.clock() - self.lastProgress > 2.5 then
 		self.waypoints = nil
 		self.lastPath = 0
+		self.wanderGoal = nil
 		self.lastProgress = os.clock()
 	end
 
-	local target, dist = self:findTarget()
-	if target then
-		local hrp = target:FindFirstChild("HumanoidRootPart") :: BasePart
-		if dist <= Config.KEIS_KILL_RANGE then
-			self:kill(target)
+	-- golden keis: runs around, then escapes
+	if def.passive then
+		if os.clock() - self.bornAt > (def.lifetime or 25) then
+			self.alive = false
+			Keis.registry[self.model] = nil
+			hooks.onExpired(self)
+			self.model:Destroy()
 			return
 		end
-		if dist <= Config.KEIS_DIRECT_CHASE_RANGE and self:canSee(target) then
+		if self.wanderGoal == nil or (self.root.Position - self.wanderGoal).Magnitude < 6 then
+			local rooms = hooks.roomCenters
+			self.wanderGoal = rooms[math.random(1, #rooms)] + Vector3.new(math.random(-8, 8), 0, math.random(-8, 8))
 			self.waypoints = nil
+		end
+		self:moveTowards(self.wanderGoal :: Vector3)
+		return
+	end
+
+	-- the boss summons minis
+	if def.summon and os.clock() - self.lastSummon > (def.summonEvery or 8) then
+		self.lastSummon = os.clock()
+		hooks.onSummon(self)
+	end
+
+	-- pick a target: a nearby crew member, otherwise the reactor
+	local aggro = if def.boss then 70 else 45
+	local best: Model? = nil
+	local bestDist = aggro
+	for _, character in hooks.getTargets() do
+		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if hrp then
+			local d = (hrp.Position - self.root.Position).Magnitude
+			if d < bestDist then
+				best, bestDist = character, d
+			end
+		end
+	end
+
+	local now = os.clock()
+	local cooldown = if def.boss then 1.4 else 1
+	if best then
+		local hrp = best:FindFirstChild("HumanoidRootPart") :: BasePart
+		if bestDist <= 3.5 + 1.6 * def.scale then
 			self.humanoid:MoveTo(hrp.Position)
+			if now - self.lastAttack > cooldown then
+				self.lastAttack = now
+				hooks.onAttackPlayer(self, best, def.damage)
+			end
 			return
 		end
-		if os.clock() - self.lastPath > 0.8 then
-			self:pathTo(hrp.Position)
-		end
-	else
-		local done = self.waypoints == nil or self.wpIndex > #(self.waypoints :: { PathWaypoint })
-		if done and os.clock() - self.lastPath > 1.5 then
-			local cells = self.opts.cells
-			self:pathTo(cells[math.random(1, #cells)])
-		end
+		self:moveTowards(hrp.Position, best)
+		return
 	end
 
-	local wps = self.waypoints
-	if wps and self.wpIndex <= #wps then
-		local wp = wps[self.wpIndex]
-		self.humanoid:MoveTo(wp.Position)
-		local flat = Vector3.new(wp.Position.X - self.root.Position.X, 0, wp.Position.Z - self.root.Position.Z)
-		if flat.Magnitude < 3 then
-			self.wpIndex += 1
+	local reactor = hooks.reactor
+	if reactor then
+		local flat = Vector3.new(reactor.Position.X - self.root.Position.X, 0, reactor.Position.Z - self.root.Position.Z)
+		if flat.Magnitude <= hooks.reactorRadius + 2 + 1.6 * def.scale then
+			self.humanoid:MoveTo(self.root.Position)
+			if now - self.lastAttack > cooldown then
+				self.lastAttack = now
+				hooks.onAttackReactor(self, def.damage)
+			end
+			return
 		end
+		-- walk to the edge of the reactor (its center is solid, so a path there would fail)
+		local out = Vector3.new(-flat.X, 0, -flat.Z)
+		if out.Magnitude < 0.1 then
+			out = Vector3.new(1, 0, 0)
+		end
+		local goal = Vector3.new(reactor.Position.X, self.root.Position.Y, reactor.Position.Z) + out.Unit * (hooks.reactorRadius + 1.5)
+		self:moveTowards(goal)
 	end
-end
-
-function Keis:stun(seconds: number)
-	self.stunnedUntil = os.clock() + seconds
-	self.text.Text = "K E I S . . ."
-	self.waypoints = nil
-end
-
-function Keis:destroy()
-	self.alive = false
-	self.model:Destroy()
 end
 
 return Keis

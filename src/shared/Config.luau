@@ -1,116 +1,168 @@
 --!strict
--- Jupiter 2011 Incident — every tunable value lives here.
+-- JUPITER 2011 INCIDENT — every tunable value lives here.
 
 local Config = {}
 
--- Round flow
+-- Flow ------------------------------------------------------------------------
 Config.MIN_PLAYERS = 1
-Config.INTERMISSION_TIME = 20
-Config.ROUND_TIME = 300
-Config.RESULTS_TIME = 8
-Config.KEIS_GRACE_TIME = 8 -- seconds before the Keis wake up
+Config.LOBBY_TIME = 15 -- countdown before a run starts
+Config.BREAK_TIME = 15 -- shop time between waves
+Config.BOSS_BREAK_TIME = 25 -- longer break after a boss wave
+Config.GAMEOVER_TIME = 12
 
--- Station layout (procedurally generated every round)
-Config.MAP_ORIGIN = Vector3.new(0, 0, 0)
-Config.LOBBY_POSITION = Vector3.new(0, 0, -450)
-Config.GRID_SIZE = 6 -- 6x6 rooms
-Config.CELL_SIZE = 36
-Config.WALL_HEIGHT = 16
-Config.DOOR_WIDTH = 8
-Config.DOOR_HEIGHT = 11
-Config.OPEN_WALL_CHANCE = 0.25 -- chance a wall is removed entirely
+-- Crew ------------------------------------------------------------------------
+Config.BASE_HEALTH = 100
+Config.BASE_WALKSPEED = 16
+Config.DOWNED_BLEEDOUT = 25 -- seconds a downed player has to be revived
+Config.REVIVE_TIME = 2.5 -- hold time to revive a crewmate
+Config.REVIVE_HEALTH = 0.4 -- revived with 40% health
 
--- Objectives
-Config.FUEL_CELLS_SPAWNED = 7
-Config.FUEL_CELLS_REQUIRED = 5
-Config.AUDIO_LOGS_SPAWNED = 6
+-- Reactor (the thing the Keis want) ---------------------------------------------
+Config.REACTOR_MAX_HP = 1000
+Config.REPAIR_COST = 60
+Config.REPAIR_AMOUNT = 250
 
--- Keis entities
-Config.KEIS_BASE_COUNT = 2
-Config.KEIS_EXTRA_EVERY_N_PLAYERS = 3 -- +1 Keis for every N players
-Config.KEIS_BASE_SPEED = 12
-Config.KEIS_SPEED_PER_CELL = 1.3 -- they get faster ("angrier") per fuel cell taken
-Config.KEIS_HEARING_RANGE = 95 -- they hunt anyone within this range
-Config.KEIS_DIRECT_CHASE_RANGE = 35 -- inside this + line of sight they run straight at you
-Config.KEIS_KILL_RANGE = 4.5
-
--- Sound asset ids ("rbxassetid://123..."). Leave "" to skip a sound.
--- Upload your own audio in the Creator Hub, then paste the ids here.
-Config.Sounds = {
-	KeisChant = "", -- looping "keis keis keis" chant on each entity
-	Ambience = "", -- looping station hum
-	Jumpscare = "",
-	Static = "", -- looping static, volume follows Keis distance
-	Pickup = "",
+-- Waves ---------------------------------------------------------------------------
+Config.Waves = {
+	BaseCount = 6,
+	CountPerWave = 3,
+	ExtraPlayerMultiplier = 0.5, -- +50% Keis per extra player
+	HealthScalePerWave = 0.12, -- +12% Keis HP per wave
+	SpawnIntervalStart = 1.2,
+	SpawnIntervalMin = 0.35,
+	BossEvery = 5,
+	MaxAlive = 35,
+	GoldenChance = 0.04, -- chance each spawn is a Golden Keis
+	OutageFromWave = 3,
+	OutageChance = 0.35, -- chance a wave has a power outage
+	OutageDuration = 18,
+	OutageSpeedBonus = 3,
+	ClearBonusBase = 20, -- credits for everyone when a wave is cleared
+	ClearBonusPerWave = 5,
 }
 
--- The "filter" applied to every audio log (the meme's creepy voice effect)
-Config.LogFilter = {
-	Pitch = 0.78,
-	Distortion = 0.55,
-	ReverbDecay = 3.5,
+-- Keis types -------------------------------------------------------------------------
+-- weight = how often it spawns once unlockWave is reached (0 = never spawned by waves)
+Config.KeisTypes = {
+	Basic = { name = "KEIS", hp = 60, speed = 13, damage = 10, reward = 5, xp = 2, scale = 1,
+		color = Color3.fromRGB(176, 142, 66), unlockWave = 1, weight = 10 },
+	Skeleton = { name = "SKELETON KEIS", hp = 35, speed = 20, damage = 6, reward = 6, xp = 2, scale = 0.8,
+		color = Color3.fromRGB(225, 220, 200), unlockWave = 3, weight = 6 },
+	Keyring = { name = "KEYRING", hp = 90, speed = 11, damage = 10, reward = 8, xp = 3, scale = 1.1,
+		color = Color3.fromRGB(150, 160, 175), unlockWave = 4, weight = 4, splitInto = "Mini", splitCount = 3 },
+	Iron = { name = "IRON KEIS", hp = 220, speed = 9, damage = 22, reward = 15, xp = 5, scale = 1.45,
+		color = Color3.fromRGB(70, 72, 80), unlockWave = 6, weight = 3 },
+	Mini = { name = "MINI KEIS", hp = 18, speed = 19, damage = 4, reward = 2, xp = 1, scale = 0.55,
+		color = Color3.fromRGB(200, 160, 80), unlockWave = 99, weight = 0 },
+	Golden = { name = "GOLDEN KEIS", hp = 80, speed = 17, damage = 0, reward = 60, xp = 20, scale = 0.9,
+		color = Color3.fromRGB(255, 200, 40), unlockWave = 1, weight = 0, passive = true, lifetime = 25 },
+	Master = { name = "MASTER KEIS", hp = 1500, speed = 10, damage = 35, reward = 150, xp = 60, scale = 2.6,
+		color = Color3.fromRGB(120, 20, 20), unlockWave = 99, weight = 0, boss = true,
+		summon = "Mini", summonEvery = 8, summonCount = 3 },
 }
 
--- Audio logs: the last recordings of the 2011 crew.
--- soundId = your recorded voice line; text = subtitle shown while it plays.
-Config.AudioLogs = {
-	{ speaker = "CREW // NOVA — LOG 01", soundId = "", duration = 6,
-		text = "okay chat we're live from JUPITER. no, actually Jupiter. signal's kinda bad but we are SO back." },
-	{ speaker = "CREW // DEX — LOG 02", soundId = "", duration = 6,
-		text = "guys something is tapping on the hull. tap. tap. tap. no... no that's not the ship." },
-	{ speaker = "CREW // NOVA — LOG 03", soundId = "", duration = 6,
-		text = "it said something. it literally said 'keis'. what does that even MEAN bro" },
-	{ speaker = "CREW // MARLO — LOG 04", soundId = "", duration = 6,
-		text = "do NOT open cargo bay C. there's like a hundred of them in there and they're all... keys?" },
-	{ speaker = "CREW // DEX — LOG 05", soundId = "", duration = 7,
-		text = "keis keis keis o algo... it keeps saying it. chat why is it saying it. chat??" },
-	{ speaker = "CREW // MARLO — LOG 06", soundId = "", duration = 7,
-		text = "if anyone finds this: get the fuel cells, get to the pod. don't stop moving. they get faster when they're angry." },
-	{ speaker = "CREW // ??? — LOG 07", soundId = "", duration = 6,
-		text = "[unintelligible] ...it's in the stream. it's IN the stream. end it. END THE STR—" },
-	{ speaker = "FINAL LOG — 07.14.2011", soundId = "", duration = 8,
-		text = "this is the last recording. the keis took everyone. if you can hear this... you're already on Jupiter." },
+-- Weapon ----------------------------------------------------------------------------------
+Config.Weapon = {
+	BaseDamage = 20,
+	FireInterval = 0.2,
+	MagSize = 15,
+	ReloadTime = 1.5,
+	Range = 220,
+	Spread = 0.05, -- radians between Split Beam shots
+	CritMultiplier = 2, -- hitting a Keis in the face
 }
 
--- Image shown as the face on each Keis ("rbxassetid://..."). "" = a drawn creepy face.
--- Use a face you made or have rights to: Roblox moderates images of real people.
+-- Upgrades (bought with credits; reset every run) ------------------------------------------------
+Config.Upgrades = {
+	{ id = "Damage", name = "PLASMA DAMAGE", desc = "+20% damage", baseCost = 30, growth = 1.55, max = 8, icon = "✦" },
+	{ id = "FireRate", name = "TRIGGER CYCLER", desc = "+12% fire rate", baseCost = 35, growth = 1.6, max = 6, icon = "⟫" },
+	{ id = "MaxHealth", name = "SUIT PLATING", desc = "+25 max health", baseCost = 25, growth = 1.5, max = 6, icon = "✚" },
+	{ id = "Speed", name = "MAG BOOTS", desc = "+1.5 walk speed", baseCost = 25, growth = 1.6, max = 5, icon = "➤" },
+	{ id = "Mag", name = "BIGGER MAG", desc = "+5 magazine size", baseCost = 20, growth = 1.5, max = 4, icon = "▤" },
+	{ id = "Multishot", name = "SPLIT BEAM", desc = "+1 beam per shot", baseCost = 150, growth = 2.2, max = 3, icon = "⋔" },
+}
+
+function Config.upgradeCost(def: { baseCost: number, growth: number }, level: number): number
+	return math.floor(def.baseCost * def.growth ^ level)
+end
+
+-- Permanent progression (saved) ---------------------------------------------------------------------
+Config.DATASTORE_NAME = "Jupiter2011_v1"
+Config.XP_PER_WAVE = 15 -- times the wave number
+Config.LEVEL_DAMAGE_BONUS = 0.01 -- +1% damage per level
+function Config.xpForLevel(level: number): number
+	return math.floor(100 * level ^ 1.35)
+end
+Config.Titles = {
+	{ level = 1, title = "CADET" },
+	{ level = 5, title = "KEY HUNTER" },
+	{ level = 10, title = "LOCKSMITH" },
+	{ level = 20, title = "VENT WARDEN" },
+	{ level = 35, title = "JUPITER VETERAN" },
+	{ level = 50, title = "THE TRUE SURVIVOR" },
+}
+function Config.titleFor(level: number): string
+	local title = Config.Titles[1].title
+	for _, t in Config.Titles do
+		if level >= t.level then
+			title = t.title
+		end
+	end
+	return title
+end
+
+-- Look & sound -----------------------------------------------------------------------------------
+-- Image shown as the face on each Keis ("rbxassetid://..."). "" = a drawn face.
 Config.KeisFaceImage = ""
 
--- The gun ("I GOT A GUN" / "Reloading!!" from the videos). One spawns per round.
-Config.GUN_AMMO = 6
-Config.GUN_RELOAD_TIME = 2.5
-Config.GUN_FIRE_COOLDOWN = 0.35
-Config.GUN_RANGE = 120
-Config.GUN_STUN_TIME = 4
-
--- Power outage: "the keis shut the ship's power off"
-Config.OUTAGE_AT_FRACTION = { 0.35, 0.6 } -- happens randomly between 35% and 60% of the round
-Config.OUTAGE_DURATION = 20
-Config.OUTAGE_KEIS_SPEED_BONUS = 4
-
--- Narrator captions (bottom of the screen). {name} = a player's display name.
-Config.Narration = {
-	KeisBoard = "The keis board the ship and chase {name} algo",
-	Taunt = "They begin to taunt {name}",
-	Kill = "The keis find {name}. {name} is deceased",
-	FuelCell = "{name} grabs a fuel cell. the keis heard that",
-	Outage = "The keis shut the ship's power off. The crew is separated",
-	PowerBack = "Emergency power restored... for now",
-	GunPickup = "{name} gets the gun and begins to shoot the keis",
-	PodOnline = "The escape pod is online. Someone has to make it",
-	Escape = "{name} reaches the pod and escapes Jupiter",
-	TimeUp = "The station goes dark. The incident was never reported",
+-- Sound ids ("rbxassetid://123..."). "" = silent until you add one.
+Config.Sounds = {
+	KeisChant = "", -- "keis keis keis o algo o algo", loops on every Keis
+	BossChant = "",
+	Music = "", -- background loop
+	WaveStart = "",
+	Alarm = "",
+	Shoot = "",
+	Hit = "",
+	Kill = "",
+	LevelUp = "",
+	Buy = "",
 }
 
--- Random lines the Keis "say" above their heads
 Config.KeisChatter = {
+	"keis keis keis o algo o algo",
 	"KEIS KEIS KEIS",
 	"keis keis keis o algo",
+	"o algo o algo",
 	"KEIS",
 	"k e i s",
-	"keis... keis...",
-	"KEIS KEIS KEIS KEIS KEIS",
-	"o algo",
+}
+
+Config.WaveSubtitles = {
+	"THEY'RE IN THE VENTS",
+	"KEIS KEIS KEIS O ALGO O ALGO",
+	"PROTECT THE REACTOR",
+	"THE KEYS BOARD THE SHIP",
+	"DON'T LET THEM TAUNT YOU",
+	"SIGNAL LOST · JULY 14, 2011",
+}
+
+-- Narrator captions. {name} = a player's display name.
+Config.Narration = {
+	RunStart = "July 14, 2011. The crew reaches Jupiter orbit. Something is in the vents",
+	Vents = "The keys board the ship and chase {name} algo",
+	Boss = "The Master Keis has boarded the ship",
+	Outage = "The keis shut the ship's power off. The crew is separated",
+	PowerBack = "Emergency power restored",
+	ReactorLow = "The reactor is failing. The keis are getting in",
+	Downed = "{name} is down. Someone revive them",
+	Revived = "{name} was revived",
+	Deceased = "{name} is deceased",
+	Golden = "A GOLDEN KEIS appeared. Catch it before it escapes",
+	GoldenCaught = "{name} caught the golden keis",
+	GoldenEscaped = "The golden keis got away",
+	WaveClear = "Wave cleared. The keis are regrouping",
+	GameOver = "The incident was never reported",
 }
 
 return Config
