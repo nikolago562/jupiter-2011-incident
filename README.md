@@ -6,6 +6,16 @@ Everything is shown like recovered **security-camera footage**: `07/14/2011 23:4
 July 14, 2011. Your crew is aboard the **USS KEPLER** in orbit around Jupiter. The **Keis** crawl out of the vents, chanting
 *"keis keis keis o algo o algo"*. They're giant brass keys walking on **spider legs**, with a **ring of teeth** inside the key's head. Defend the reactor, keep your crew alive, and see how many waves you can survive.
 
+## What's in it
+- **Start menu:** a live 3D scene with the Keis standing on volcanic rock and Jupiter rising behind them. PLAY, how to play, and your saved stats.
+- **The USS KEPLER:** 9 detailed rooms with ceiling arches, sliding doors that open when anyone gets close, consoles with live screens,
+  warning signs, steam leaks, sparking panels, cables, lockers, pipes, floor grates and Future lighting with real shadows.
+- **Jupiter:** 110 color bands following its real cloud belts, the layered Great Red Spot, white ovals, haze, a soft night side,
+  Io, Europa and Ganymede, a full starfield with the Milky Way and nebulas.
+- **Shooter feel:** over-the-shoulder camera with a center crosshair, sprint (Shift), recoil, muzzle flash, hit shake.
+- **Io (after wave 10):** the ship lands on Jupiter's volcanic moon. Terrain with craters, lava lakes, a smoking volcano,
+  sulfur fields, the landed ship, floodlights, and **25% gravity** (long floaty jumps, dust when you land).
+
 ## The loop
 1. **Lobby:** the crew spawns on the bridge. Through the windows you can see Jupiter, with its bands, the Great Red Spot and two moons.
 2. **Waves:** the Keis pour out of the vents and go for the **reactor**, or for any crew member who gets close.
@@ -45,7 +55,13 @@ July 14, 2011. Your crew is aboard the **USS KEPLER** in orbit around Jupiter. T
 |---|---|
 | `src/shared/Config.luau` | **All the tuning:** waves, Keis types, weapon, upgrade prices, XP and titles, sound ids, narrator lines |
 | `src/server/GameManager.server.luau` | Run/wave loop, boss waves, downed/revive, outages, alarm, reactor, game over |
-| `src/server/ShipBuilder.luau` | The ship (9 rooms, windows), reactor, vents, props, Jupiter and space |
+| `src/server/ShipBuilder.luau` | The ship (9 detailed rooms, sliding doors, consoles, steam, sparks), reactor, vents |
+| `src/server/MoonBuilder.luau` | Io: terrain, craters, lava, volcano, landed ship, generator, fissures |
+| `src/shared/SpaceArt.luau` | Jupiter (bands, Great Red Spot, moons) and the starfield |
+| `src/shared/KeisModel.luau` | The Keis model (used by the server and the menu) |
+| `src/client/Menu.client.luau` | Start menu scene + PLAY, and full-screen transitions |
+| `src/client/Movement.client.luau` | Shoulder camera, sprint, camera bob, hit shake, moon dust |
+| `src/client/ShipFX.client.luau` | Sliding doors and console screen flicker |
 | `src/server/KeisAI.luau` | Keis models (spider legs, toothy mouth), health bars, AI, chant, death effect |
 | `src/server/Suit.luau` | Spacesuits: suit colors, glass helmet, life-support pack |
 | `src/server/Combat.luau` | Server-checked shooting, Blaster + Minigun, crits, Split Beam, reload, credits, upgrade shop |

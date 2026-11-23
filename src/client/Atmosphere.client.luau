@@ -65,7 +65,9 @@ task.spawn(function()
 	while true do
 		local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		local ship = workspace:FindFirstChild("Ship")
-		if hrp and ship then
+		if ReplicatedStorage:GetAttribute("Stage") == "Moon" then
+			currentCam = "CAM EXT-1 (IO SURFACE)"
+		elseif hrp and ship then
 			for _, room in ship:GetChildren() do
 				local center = room:GetAttribute("Center") :: Vector3?
 				local size = room:GetAttribute("Size") :: Vector2?

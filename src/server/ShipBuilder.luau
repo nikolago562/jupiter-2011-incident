@@ -8,6 +8,8 @@
 --                               [Observ.]   [Medbay]
 
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SpaceArt = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpaceArt"))
 local Lighting = game:GetService("Lighting")
 
 local ShipBuilder = {}
@@ -93,6 +95,238 @@ local function sectorLabel(parent: Instance, cf: CFrame, code: string)
 	l.TextTransparency = 0.15
 	l.Text = code
 	l.Parent = sg
+end
+
+-- Detail pass ----------------------------------------------------------------------------------------
+local SMOKE = "rbxasset://textures/particles/smoke_main.dds"
+local SPARK = "rbxasset://textures/particles/sparkles_main.dds"
+local doorKeys: { [string]: boolean } = {}
+
+local function emitter(parent: Instance, props: { [string]: any }): ParticleEmitter
+	local e = Instance.new("ParticleEmitter")
+	for k, v in props do
+		(e :: any)[k] = v
+	end
+	e.Parent = parent
+	return e
+end
+
+-- sliding double doors; clients animate them (Doors.client) when anyone gets close
+local function slidingDoor(parent: Instance, center: Vector3, alongX: boolean, width: number, key: string)
+	if doorKeys[key] then
+		return
+	end
+	doorKeys[key] = true
+	local along = if alongX then Vector3.xAxis else Vector3.zAxis
+	for _, sideSign in { -1, 1 } do
+		local leafCenter = center + along * sideSign * (width / 4)
+		local leafSize = if alongX then Vector3.new(width / 2, DOOR_H, 0.5) else Vector3.new(0.5, DOOR_H, width / 2)
+		local leaf = deco(parent, leafSize, CFrame.new(leafCenter), Color3.fromRGB(105, 110, 116), Enum.Material.DiamondPlate)
+		local stripeSize = if alongX then Vector3.new(width / 2, 1, 0.6) else Vector3.new(0.6, 1, width / 2)
+		local stripe = deco(parent, stripeSize, CFrame.new(leafCenter + Vector3.new(0, -DOOR_H / 2 + 2, 0)), HAZARD_Y, Enum.Material.SmoothPlastic)
+		local winSize = if alongX then Vector3.new(0.9, 3, 0.6) else Vector3.new(0.6, 3, 0.9)
+		local win = deco(parent, winSize, CFrame.new(leafCenter + Vector3.new(0, 1.5, 0) - along * sideSign * (width / 4 - 1.2)),
+			Color3.fromRGB(120, 200, 255), Enum.Material.Neon)
+		win.Transparency = 0.3
+		for _, p in { leaf, stripe, win } do
+			p:SetAttribute("ClosedCF", p.CFrame)
+			p:SetAttribute("OpenOffset", along * sideSign * (width / 2 - 0.4))
+			p:SetAttribute("DoorCenter", center)
+			CollectionService:AddTag(p, "DoorLeaf")
+		end
+	end
+end
+
+local function freeSpots(def: RoomDef, side: string, length: number, margin: number): { number }
+	local spots = {}
+	local t = -length / 2 + margin
+	while t <= length / 2 - margin do
+		local ok = true
+		for _, h in def.holes do
+			if h.side == side and math.abs(t - h.offset) < h.width / 2 + margin then
+				ok = false
+			end
+		end
+		if ok then
+			table.insert(spots, t)
+		end
+		t += 2
+	end
+	return spots
+end
+
+local SCREEN_LINES = {
+	{ "REACTOR OUTPUT", "98.2%", "CORE TEMP 3412K", "COOLANT FLOW OK" },
+	{ "NAV // JUPITER ORBIT", "ALT 71,492 KM", "VEL 42.1 KM/S", "DRIFT +0.003" },
+	{ "LIFE SUPPORT", "O2 20.9%", "CO2 0.04%", "HULL PRESSURE OK" },
+	{ "SENSOR SWEEP", "UNKNOWN SIGNAL", "SOURCE: VENTS", "PATTERN: K-E-I-S" },
+	{ "COMMS // EARTH", "SIGNAL LOST", "LAST CONTACT", "07/14/2011 23:31" },
+}
+local SIGNS = { "DANGER\nHIGH VOLTAGE", "AUTHORIZED\nPERSONNEL ONLY", "CAUTION\nLOW GRAVITY AREA", "WARNING\nVENT ACCESS", "SECTOR\nSEALED" }
+
+local function console(parent: Instance, cf: CFrame, rng: Random)
+	-- cf: at floor, facing into the room (LookVector = into the room)
+	part(parent, Vector3.new(3.4, 3, 1.4), cf * CFrame.new(0, 1.5, 0), Color3.fromRGB(70, 74, 80), Enum.Material.Metal)
+	local screen = deco(parent, Vector3.new(3, 1.8, 0.15), cf * CFrame.new(0, 3.6, 0.15) * CFrame.Angles(math.rad(25), 0, 0),
+		Color3.fromRGB(10, 18, 14), Enum.Material.SmoothPlastic)
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(300, 180)
+	sg.LightInfluence = 0
+	sg.Brightness = 1.6
+	sg.Parent = screen
+	local lines = SCREEN_LINES[rng:NextInteger(1, #SCREEN_LINES)]
+	local color = if rng:NextNumber() < 0.5 then Color3.fromRGB(90, 255, 140) else Color3.fromRGB(255, 170, 70)
+	for i, line in lines do
+		local l = Instance.new("TextLabel")
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.fromOffset(12, 8 + (i - 1) * 32)
+		l.Size = UDim2.new(1, -24, 0, 28)
+		l.Font = Enum.Font.Code
+		l.TextSize = 22
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextColor3 = color
+		l.Text = line
+		l.Parent = sg
+	end
+	CollectionService:AddTag(screen, "ConsoleScreen")
+	light(screen, color, 7, 0.5)
+	-- button strip
+	for i = -1, 1 do
+		deco(parent, Vector3.new(0.35, 0.15, 0.35), cf * CFrame.new(i * 0.8, 3.05, -0.3),
+			if i == 0 then Color3.fromRGB(255, 60, 50) else Color3.fromRGB(255, 200, 60), Enum.Material.Neon)
+	end
+end
+
+local function sign(parent: Instance, cf: CFrame, text: string)
+	local board = deco(parent, Vector3.new(4.2, 2.4, 0.1), cf, HAZARD_Y, Enum.Material.SmoothPlastic)
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(210, 120)
+	sg.LightInfluence = 1
+	sg.Parent = board
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.fromScale(1, 1)
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.GothamBlack
+	l.TextScaled = true
+	l.TextColor3 = Color3.fromRGB(20, 20, 20)
+	l.Text = text
+	l.Parent = sg
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 10)
+	pad.PaddingRight = UDim.new(0, 10)
+	pad.PaddingTop = UDim.new(0, 8)
+	pad.PaddingBottom = UDim.new(0, 8)
+	pad.Parent = l
+end
+
+local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
+	local c, sx, sz = def.center, def.size.X, def.size.Y
+	local alongX = sx >= sz
+	local long, short = math.max(sx, sz), math.min(sx, sz)
+
+	-- ceiling arches across the short axis, with corner braces
+	local t = -long / 2 + 4
+	while t < long / 2 - 2 do
+		local pos = if alongX then c + Vector3.new(t, H - 0.6, 0) else c + Vector3.new(0, H - 0.6, t)
+		local beam = if alongX then Vector3.new(1.2, 1.2, short - 2) else Vector3.new(short - 2, 1.2, 1.2)
+		deco(folder, beam, CFrame.new(pos), RIB, Enum.Material.Metal)
+		for _, sgn in { -1, 1 } do
+			local off = if alongX then Vector3.new(0, -1.4, sgn * (short / 2 - 2)) else Vector3.new(sgn * (short / 2 - 2), -1.4, 0)
+			local rot = if alongX then CFrame.Angles(sgn * math.rad(45), 0, 0) else CFrame.Angles(0, 0, -sgn * math.rad(45))
+			deco(folder, Vector3.new(0.9, 3.4, 0.9), CFrame.new(pos + off) * rot, RIB, Enum.Material.Metal)
+		end
+		t += 8
+	end
+
+	-- cable bundles along the ceiling
+	for _, off in { -short / 2 + 3, short / 2 - 3.6 } do
+		for k = 0, 1 do
+			local pos = if alongX then c + Vector3.new(0, H - 1.8 - k * 0.45, off + k * 0.5) else c + Vector3.new(off + k * 0.5, H - 1.8 - k * 0.45, 0)
+			local cable = deco(folder, Vector3.new(long - 3, 0.35, 0.35), CFrame.new(pos) * (if alongX then CFrame.new() else CFrame.Angles(0, math.rad(90), 0)),
+				if k == 0 then Color3.fromRGB(25, 25, 28) else Color3.fromRGB(150, 40, 35), Enum.Material.SmoothPlastic)
+			cable.Shape = Enum.PartType.Cylinder
+		end
+	end
+
+	-- consoles and signs on walls with free space
+	local placedConsoles, placedSigns = 0, 0
+	for _, side in { "N", "S", "E", "W" } do
+		local sideAlongX = side == "N" or side == "S"
+		local length = if sideAlongX then sx else sz
+		local spots = freeSpots(def, side, length, 5)
+		if #spots > 0 then
+			local inward = if side == "N" then Vector3.new(0, 0, 1) elseif side == "S" then Vector3.new(0, 0, -1)
+				elseif side == "E" then Vector3.new(-1, 0, 0) else Vector3.new(1, 0, 0)
+			local fixed = if side == "N" then c.Z - sz / 2 elseif side == "S" then c.Z + sz / 2 elseif side == "E" then c.X + sx / 2 else c.X - sx / 2
+			local function wallPoint(tt: number, y: number, depth: number): Vector3
+				local base = if sideAlongX then Vector3.new(c.X + tt, c.Y + y, fixed) else Vector3.new(fixed, c.Y + y, c.Z + tt)
+				return base + inward * depth
+			end
+			if placedConsoles < 2 and rng:NextNumber() < 0.75 then
+				local tt = spots[rng:NextInteger(1, #spots)]
+				local p = wallPoint(tt, 0, 2)
+				console(folder, CFrame.lookAt(p, p + inward), rng)
+				placedConsoles += 1
+			end
+			if placedSigns < 1 and rng:NextNumber() < 0.6 then
+				local tt = spots[rng:NextInteger(1, #spots)]
+				local p = wallPoint(tt, 7.5, 1.3)
+				sign(folder, CFrame.lookAt(p, p + inward), SIGNS[rng:NextInteger(1, #SIGNS)])
+				placedSigns += 1
+			end
+		end
+	end
+
+	-- steam leaking from the pipes
+	for _ = 1, 2 do
+		local side = if rng:NextNumber() < 0.5 then 1 else -1
+		local tt = rng:NextNumber(-long / 2 + 4, long / 2 - 4)
+		local pos = if alongX then c + Vector3.new(tt, H - 1, side * (short / 2 - 1.6)) else c + Vector3.new(side * (short / 2 - 1.6), H - 1, tt)
+		local holder = deco(folder, Vector3.new(0.6, 0.6, 0.6), CFrame.new(pos), PIPE, Enum.Material.Metal)
+		emitter(holder, {
+			Texture = SMOKE, Rate = 4, Lifetime = NumberRange.new(2, 3.5), Speed = NumberRange.new(2, 4),
+			SpreadAngle = Vector2.new(25, 25), EmissionDirection = Enum.NormalId.Bottom, RotSpeed = NumberRange.new(-30, 30),
+			Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.8), NumberSequenceKeypoint.new(1, 5) }),
+			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 1) }),
+			Color = ColorSequence.new(Color3.fromRGB(220, 225, 230)), LightInfluence = 0.8,
+		})
+	end
+
+	-- a broken, sparking wall panel in some rooms
+	if rng:NextNumber() < 0.45 then
+		local side = if rng:NextNumber() < 0.5 then 1 else -1
+		local tt = rng:NextNumber(-long / 2 + 5, long / 2 - 5)
+		local pos = if alongX then c + Vector3.new(tt, 9, side * (short / 2 - 1.1)) else c + Vector3.new(side * (short / 2 - 1.1), 9, tt)
+		local box = deco(folder, Vector3.new(1.6, 1.6, 1.6), CFrame.new(pos), Color3.fromRGB(40, 40, 44), Enum.Material.CorrodedMetal)
+		emitter(box, {
+			Texture = SPARK, Rate = 6, Lifetime = NumberRange.new(0.3, 0.7), Speed = NumberRange.new(8, 14),
+			SpreadAngle = Vector2.new(60, 60), Acceleration = Vector3.new(0, -40, 0), LightEmission = 1,
+			Size = NumberSequence.new(0.25, 0), Color = ColorSequence.new(Color3.fromRGB(255, 200, 90)),
+		})
+		local l = light(box, Color3.fromRGB(255, 170, 80), 12, 1.2)
+		task.spawn(function()
+			while box.Parent do
+				l.Enabled = math.random() < 0.5
+				task.wait(math.random() * 0.25)
+			end
+		end)
+	end
+
+	-- lockers in quarters and medbay
+	if def.name == "Crew Quarters" or def.name == "Medbay" then
+		-- quarters: against the south wall; medbay: against the north wall (both away from windows)
+		local facing = if def.name == "Medbay" then 1 else -1
+		local wallZ = if facing == 1 then c.Z - sz / 2 + 1.6 else c.Z + sz / 2 - 1.6
+		for i = 0, 3 do
+			local x = c.X + sx / 2 - 2.5 - i * 2.3
+			part(folder, Vector3.new(2.2, 7, 1.8), CFrame.new(x, 3.5, wallZ), Color3.fromRGB(85, 95, 110), Enum.Material.Metal)
+			for k = 0, 2 do
+				deco(folder, Vector3.new(1.2, 0.12, 0.1), CFrame.new(x, 5.6 + k * 0.4, wallZ + facing * 0.92), Color3.fromRGB(30, 30, 35), Enum.Material.Metal)
+			end
+		end
+	end
 end
 
 local function buildRoom(parent: Instance, def: RoomDef): Folder
@@ -190,6 +424,10 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 				end
 				local header = if alongX then Vector3.new(h.b - h.a + 1.8, 0.8, 1.4) else Vector3.new(1.4, 0.8, h.b - h.a + 1.8)
 				deco(folder, header, CFrame.new(at((h.a + h.b) / 2, h.top + 0.4, 0.7)), RIB, Enum.Material.Metal)
+				local boundary = if side == "N" then c.Z - sz / 2 elseif side == "S" then c.Z + sz / 2 elseif side == "E" then c.X + sx / 2 else c.X - sx / 2
+				local doorCenter = at((h.a + h.b) / 2, DOOR_H / 2, 0)
+				local along = if alongX then doorCenter.X else doorCenter.Z
+				slidingDoor(folder, doorCenter, alongX, h.b - h.a, string.format("%s|%.1f|%.1f", if alongX then "x" else "z", boundary, along))
 				local lamp = if alongX then Vector3.new(2, 0.3, 0.2) else Vector3.new(0.2, 0.3, 2)
 				local l = deco(folder, lamp, CFrame.new(at((h.a + h.b) / 2, h.top + 0.4, 1.45)), Color3.fromRGB(255, 70, 50), Enum.Material.Neon)
 				light(l, Color3.fromRGB(255, 80, 60), 8, 0.6)
@@ -254,7 +492,7 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 			local pz = c.Z - sz / 2 + (j - 0.5) * sz / stepZ
 			deco(folder, Vector3.new(7, 0.5, 1.4), CFrame.new(px, c.Y + H - 0.25, pz), HULL_DARK, Enum.Material.Metal)
 			local tube = deco(folder, Vector3.new(6, 0.25, 0.5), CFrame.new(px, c.Y + H - 0.55, pz), Color3.fromRGB(215, 235, 255), Enum.Material.Neon)
-			light(tube, Color3.fromRGB(200, 222, 255), 24, 0.95, "ShipLight")
+			light(tube, Color3.fromRGB(200, 222, 255), 26, 1.1, "ShipLight").Shadows = true
 		end
 	end
 
@@ -266,53 +504,6 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 	return folder
 end
 
--- Jupiter, built from stacked discs so it has real color bands ----------------------------------
-local BANDS = {
-	Color3.fromRGB(238, 222, 196), Color3.fromRGB(214, 170, 120), Color3.fromRGB(180, 120, 80),
-	Color3.fromRGB(232, 196, 150), Color3.fromRGB(200, 140, 95), Color3.fromRGB(245, 232, 210),
-	Color3.fromRGB(165, 105, 72), Color3.fromRGB(226, 182, 132),
-}
-
-local function buildJupiter(parent: Instance, center: Vector3, R: number, shipPos: Vector3)
-	local folder = Instance.new("Model")
-	folder.Name = "Jupiter"
-	folder.ModelStreamingMode = Enum.ModelStreamingMode.Persistent -- always visible, even with streaming on
-	folder.Parent = parent
-	local slices = 44
-	local t = 2 * R / slices
-	local rng = Random.new(2011)
-	local band = 1
-	for i = 0, slices - 1 do
-		local y = -R + (i + 0.5) * t
-		local r = math.sqrt(math.max(R * R - y * y, 1))
-		if rng:NextNumber() < 0.45 then
-			band = rng:NextInteger(1, #BANDS)
-		end
-		local disc = deco(folder, Vector3.new(t + 0.2, 2 * r, 2 * r), CFrame.new(center + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)), BANDS[band])
-		disc.Shape = Enum.PartType.Cylinder
-		disc.Material = Enum.Material.SmoothPlastic
-	end
-	-- the Great Red Spot, facing the ship, south of the equator
-	local toShip = shipPos - center
-	local flat = Vector3.new(toShip.X, 0, toShip.Z).Unit
-	local lat = math.rad(-22)
-	local dir = (flat * math.cos(lat) + Vector3.new(0, math.sin(lat), 0)).Unit
-	local spotPos = center + dir * (R * 0.985)
-	local spot = deco(folder, Vector3.new(R * 0.03, R * 0.26, R * 0.26), CFrame.lookAt(spotPos, spotPos + dir) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(190, 75, 50))
-	spot.Shape = Enum.PartType.Cylinder
-	-- soft glow shell
-	local glow = deco(folder, Vector3.new(R * 2.08, R * 2.08, R * 2.08), CFrame.new(center), Color3.fromRGB(255, 170, 110), Enum.Material.Neon)
-	glow.Shape = Enum.PartType.Ball
-	glow.Transparency = 0.93
-
-	-- moons
-	for _, m in { { offset = Vector3.new(-R * 1.6, R * 0.35, -R * 0.6), size = R * 0.09, color = Color3.fromRGB(235, 210, 120) },
-		{ offset = Vector3.new(-R * 0.7, -R * 0.55, -R * 1.5), size = R * 0.07, color = Color3.fromRGB(225, 225, 235) } } do
-		local moon = deco(folder, Vector3.one * m.size, CFrame.new(center + m.offset), m.color)
-		moon.Shape = Enum.PartType.Ball
-	end
-end
-
 export type ShipInfo = {
 	folder: Folder,
 	spawn: SpawnLocation,
@@ -321,6 +512,7 @@ export type ShipInfo = {
 	vents: { Vector3 },
 	roomCenters: { Vector3 },
 	leaderboard: Frame,
+	space: { Instance },
 }
 
 function ShipBuilder.build(): ShipInfo
@@ -387,8 +579,10 @@ function ShipBuilder.build(): ShipInfo
 
 	local roomCenters = {}
 	local folders: { [string]: Folder } = {}
+	local detailRng = Random.new(2011)
 	for _, def in rooms do
 		folders[def.name] = buildRoom(ship, def)
+		detailRoom(folders[def.name], def, detailRng)
 		table.insert(roomCenters, def.center)
 	end
 
@@ -484,7 +678,11 @@ function ShipBuilder.build(): ShipInfo
 	end
 
 	-- Space -------------------------------------------------------------------------------------
-	buildJupiter(ship, Vector3.new(1000, 110, 720), 460, Vector3.new(40, 8, 0))
+	local jupiterCenter, jupiterRadius = Vector3.new(1000, 110, 720), 460
+	local space = {
+		SpaceArt.jupiter(ship, jupiterCenter, jupiterRadius, Vector3.new(40, 8, 0), 1),
+		SpaceArt.stars(ship, Vector3.new(0, 0, 0), 1700, 450, 7, jupiterCenter, jupiterRadius * 2.1),
+	}
 
 	for _, child in Lighting:GetChildren() do
 		if child:IsA("Sky") or child:IsA("Atmosphere") or child:IsA("Clouds") then
@@ -498,7 +696,8 @@ function ShipBuilder.build(): ShipInfo
 	Lighting.ClockTime = 0
 	Lighting.Brightness = 1
 	Lighting.Ambient = Color3.fromRGB(30, 32, 36)
-	Lighting.OutdoorAmbient = Color3.fromRGB(170, 160, 150)
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 140, 130)
+	Lighting.ExposureCompensation = 0.15
 	Lighting.EnvironmentDiffuseScale = 0.3
 	Lighting.EnvironmentSpecularScale = 0.5
 	Lighting.FogEnd = 100000
@@ -512,6 +711,7 @@ function ShipBuilder.build(): ShipInfo
 		vents = vents,
 		roomCenters = roomCenters,
 		leaderboard = boardFrame,
+		space = space,
 	}
 end
 

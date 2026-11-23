@@ -22,8 +22,8 @@ def ref():
     return f"RBX{next(_ids):08X}"
 
 
-def item(cls, name, children="", source=None):
-    props = f'<string name="Name">{escape(name)}</string>'
+def item(cls, name, children="", source=None, extra=""):
+    props = f'<string name="Name">{escape(name)}</string>' + extra
     if source is not None:
         if "]]>" in source:
             raise SystemExit(f"{name}: source contains ']]>' which can't go in CDATA")
@@ -50,7 +50,10 @@ xml = (
     '<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" '
     'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
     'xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">\n'
-    + item("Workspace", "Workspace")
+    # streaming off: the ship, Io and Jupiter must always be loaded on every client
+    + item("Workspace", "Workspace", extra='<bool name="StreamingEnabled">false</bool>')
+    # Future lighting (Enum.Technology.Future = 4): real shadows from every light. Scripts can't set this.
+    + item("Lighting", "Lighting", extra='<token name="Technology">4</token>')
     + item("ReplicatedStorage", "ReplicatedStorage", folder("Shared", "src/shared"))
     + item("ServerScriptService", "ServerScriptService", folder("Server", "src/server"))
     + item("StarterPlayer", "StarterPlayer", item("StarterPlayerScripts", "StarterPlayerScripts", folder("Client", "src/client")))

@@ -12,6 +12,8 @@ local Keis = require(script.Parent:WaitForChild("KeisAI"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local Combat = require(script.Parent:WaitForChild("Combat"))
 local Suit = require(script.Parent:WaitForChild("Suit"))
+local MoonBuilder = require(script.Parent:WaitForChild("MoonBuilder"))
+local ServerStorage = game:GetService("ServerStorage")
 
 -- Remotes ---------------------------------------------------------------------------------
 local remotes = Instance.new("Folder")
@@ -28,7 +30,8 @@ for _, name in {
 	"LevelUp", -- (level, title)
 	"GameOver", -- (summary)
 	"Purchased", -- (id)
-	"Shoot", "Reload", "BuyUpgrade", "RepairReactor", -- client → server
+	"Transition", -- (text, seconds) fade to black and back
+	"Shoot", "Reload", "BuyUpgrade", "RepairReactor", "PlayRequest", -- client → server
 } do
 	local r = Instance.new("RemoteEvent")
 	r.Name = name
@@ -43,6 +46,17 @@ end
 local function setPhase(phase: string, timeLeft: number?)
 	setAttr("Phase", phase)
 	setAttr("TimeLeft", timeLeft or 0)
+end
+
+-- players who pressed PLAY in the menu
+local function crew(): { Player }
+	local list = {}
+	for _, p in Players:GetPlayers() do
+		if p:GetAttribute("InGame") then
+			table.insert(list, p)
+		end
+	end
+	return list
 end
 
 local function narrate(key: string, name: string?)
@@ -74,12 +88,23 @@ setAttr("Alarm", false)
 setPhase("Lobby")
 
 -- Reactor visuals: rings spin, core shifts from cyan to red as it takes damage
+-- the current stage: the ship, or Io after wave 10
+type Stage = { name: string, spawn: SpawnLocation, reactor: BasePart, reactorRadius: number, vents: { Vector3 }, roomCenters: { Vector3 } }
+local shipStage: Stage = { name = "Ship", spawn = ship.spawn, reactor = ship.reactor, reactorRadius = ship.reactorRadius,
+	vents = ship.vents, roomCenters = ship.roomCenters }
+local stage: Stage = shipStage
+local moon: any = nil
+
 local rings = {}
-for _, d in ship.reactor.Parent:GetChildren() do
-	if d.Name == "ReactorRing" then
-		table.insert(rings, { part = d :: BasePart, base = (d :: BasePart).CFrame, speed = (#rings + 1) * 0.6 * (if #rings % 2 == 0 then 1 else -1) })
+local function collectRings()
+	rings = {}
+	for _, d in (stage.reactor.Parent :: Instance):GetChildren() do
+		if d.Name == "ReactorRing" then
+			table.insert(rings, { part = d :: BasePart, base = (d :: BasePart).CFrame, speed = (#rings + 1) * 0.6 * (if #rings % 2 == 0 then 1 else -1) })
+		end
 	end
 end
+collectRings()
 task.spawn(function()
 	local angle = 0
 	while true do
@@ -88,10 +113,13 @@ task.spawn(function()
 			r.part.CFrame = r.base * CFrame.Angles(0, math.sin(angle * r.speed) * 0.45, 0) -- gyroscope wobble
 		end
 		local frac = reactorHp / Config.REACTOR_MAX_HP
-		ship.reactor.Color = Color3.fromRGB(90, 220, 255):Lerp(Color3.fromRGB(255, 50, 40), 1 - frac)
-		local l = ship.reactor:FindFirstChildOfClass("PointLight")
-		if l then
-			l.Color = ship.reactor.Color
+		local core = stage.reactor
+		if core.Parent then
+			core.Color = Color3.fromRGB(90, 220, 255):Lerp(Color3.fromRGB(255, 50, 40), 1 - frac)
+			local l = core:FindFirstChildOfClass("PointLight")
+			if l then
+				l.Color = core.Color
+			end
 		end
 		task.wait(0.05)
 	end
@@ -168,7 +196,7 @@ end
 
 local function aliveCrew(): number
 	local n = 0
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		if crewStatus(p) == "alive" then
 			n += 1
 		end
@@ -284,6 +312,8 @@ local function onCharacter(player: Player, character: Model)
 	Combat.applyCharacter(player, character)
 	local humanoid = character:WaitForChild("Humanoid", 5) :: Humanoid?
 	if humanoid then
+		humanoid.UseJumpPower = true
+		humanoid.JumpPower = if stage.name == "Moon" then Config.MOON_JUMP_POWER else 50
 		humanoid.Died:Connect(function()
 			player:SetAttribute("Downed", false)
 			if running then
@@ -292,7 +322,7 @@ local function onCharacter(player: Player, character: Model)
 				-- comes back at the next break
 			else
 				task.delay(3, function()
-					if player.Parent and not running then
+					if player.Parent and not running and player:GetAttribute("InGame") then
 						player:LoadCharacter()
 					end
 				end)
@@ -313,8 +343,18 @@ local function onPlayerAdded(player: Player)
 			Suit.apply(character)
 		end
 	end)
-	player:LoadCharacter()
+	-- the character spawns when the player presses PLAY in the menu (PlayRequest)
 end
+R.PlayRequest.OnServerEvent:Connect(function(player)
+	if player:GetAttribute("InGame") then
+		return
+	end
+	player:SetAttribute("InGame", true)
+	player:LoadCharacter()
+	if running then
+		R.Notify:FireAllClients(`{player.DisplayName} joined the crew`, "cyan")
+	end
+end)
 Players.PlayerAdded:Connect(onPlayerAdded)
 for _, p in Players:GetPlayers() do
 	task.spawn(onPlayerAdded, p)
@@ -331,8 +371,17 @@ end)
 
 -- Keis wiring ----------------------------------------------------------------------------------
 local function spawnKeis(typeId: string, at: Vector3?, hpScale: number)
-	local pos = at or ship.vents[rng:NextInteger(1, #ship.vents)]
+	local pos = at or stage.vents[rng:NextInteger(1, #stage.vents)]
 	pos += Vector3.new(rng:NextNumber(-1.5, 1.5), 0, rng:NextNumber(-1.5, 1.5))
+	if stage.name == "Moon" then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { keisFolder }
+		local hit = workspace:Raycast(pos + Vector3.new(0, 80, 0), Vector3.new(0, -200, 0), params)
+		if hit then
+			pos = hit.Position + Vector3.new(0, 3, 0)
+		end
+	end
 	return Keis.new(typeId, pos, hpScale)
 end
 
@@ -343,7 +392,7 @@ Keis.hooks.reactorRadius = ship.reactorRadius
 Keis.hooks.roomCenters = ship.roomCenters
 Keis.hooks.getTargets = function(): { Model }
 	local list = {}
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		if crewStatus(p) == "alive" and p.Character then
 			table.insert(list, p.Character)
 		end
@@ -391,7 +440,7 @@ Keis.hooks.onKilled = function(k, killer: Player?)
 			R.CrewAction:FireAllClients(killer.UserId, "*Catches the golden keis*")
 		elseif def.boss then
 			R.Announce:FireAllClients("MASTER KEIS DESTROYED", killer.DisplayName .. " landed the final shot", "gold")
-			for _, p in Players:GetPlayers() do
+			for _, p in crew() do
 				Combat.addCredits(p, 50)
 			end
 		end
@@ -482,7 +531,7 @@ end
 
 local function randomCrewName(): string?
 	local names = {}
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		if crewStatus(p) == "alive" then
 			table.insert(names, p.DisplayName)
 		end
@@ -493,7 +542,7 @@ end
 local function runWave(n: number): (boolean, string)
 	local W = Config.Waves
 	local isBoss = n % W.BossEvery == 0
-	local playerCount = math.max(1, #Players:GetPlayers())
+	local playerCount = math.max(1, #crew())
 	local count = math.floor((W.BaseCount + W.CountPerWave * (n - 1)) * (1 + (playerCount - 1) * W.ExtraPlayerMultiplier))
 	if isBoss then
 		count = math.floor(count * 0.6)
@@ -528,7 +577,7 @@ local function runWave(n: number): (boolean, string)
 			result, reason = false, "THE REACTOR WAS DESTROYED"
 			break
 		end
-		if #Players:GetPlayers() == 0 then
+		if #crew() == 0 then
 			result, reason = false, "THE SHIP WAS ABANDONED"
 			break
 		end
@@ -572,8 +621,64 @@ local function runWave(n: number): (boolean, string)
 	return result, reason
 end
 
+local function applyStage(newStage: Stage)
+	stage = newStage
+	setAttr("Stage", newStage.name)
+	Keis.hooks.reactor = newStage.reactor
+	Keis.hooks.reactorRadius = newStage.reactorRadius
+	Keis.hooks.roomCenters = newStage.roomCenters
+	ship.spawn.Enabled = newStage.name == "Ship"
+	if moon then
+		moon.spawn.Enabled = newStage.name == "Moon"
+	end
+	-- only one Jupiter in the sky at a time
+	for _, m in ship.space do
+		m.Parent = if newStage.name == "Ship" then ship.folder else ServerStorage
+	end
+	workspace.Gravity = if newStage.name == "Moon" then 196.2 * Config.MOON_GRAVITY else 196.2
+	for _, p in crew() do
+		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.UseJumpPower = true
+			humanoid.JumpPower = if newStage.name == "Moon" then Config.MOON_JUMP_POWER else 50
+		end
+	end
+	collectRings()
+end
+
+local function landOnIo()
+	R.Transition:FireAllClients("DESCENDING TO IO", 4)
+	task.wait(1.2) -- screens are black now
+	if not moon then
+		moon = MoonBuilder.build()
+	end
+	applyStage({ name = "Moon", spawn = moon.spawn, reactor = moon.reactor, reactorRadius = moon.reactorRadius,
+		vents = moon.vents, roomCenters = moon.roomCenters })
+	reactorHp = Config.REACTOR_MAX_HP
+	reactorWarned = false
+	setAttr("ReactorHP", reactorHp)
+	for _, p in crew() do
+		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			p.Character:PivotTo(moon.spawn.CFrame + Vector3.new(rng:NextNumber(-4, 4), 4, rng:NextNumber(-3, 3)))
+		end
+	end
+	R.Announce:FireAllClients("IO", "JUPITER'S VOLCANIC MOON · LOW GRAVITY · DEFEND THE GENERATOR", "gold")
+	narrate("Landing")
+end
+
+local function returnToShip()
+	if stage.name ~= "Ship" then
+		applyStage(shipStage)
+	end
+	if moon then
+		MoonBuilder.clear()
+		moon = nil
+	end
+end
+
 local function respawnCrew()
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
 		if p:GetAttribute("Downed") then
 			revive(p, nil)
@@ -589,7 +694,7 @@ local function gameOver(reason: string)
 	setPower(true)
 	local summary = { wave = wave, reason = reason, crew = {} :: { any }, mvp = 0 }
 	local bestKills = -1
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		local kills, damage = Combat.getRunStats(p)
 		table.insert(summary.crew, { userId = p.UserId, name = p.DisplayName, kills = kills, damage = damage,
 			level = p:GetAttribute("Level") or 1 })
@@ -604,11 +709,12 @@ local function gameOver(reason: string)
 	setPhase("GameOver", Config.GAMEOVER_TIME)
 	task.wait(Config.GAMEOVER_TIME)
 	running = false
+	returnToShip()
 	reactorHp = Config.REACTOR_MAX_HP
 	setAttr("ReactorHP", reactorHp)
 	setAttr("Wave", 0)
 	setAttr("KeisLeft", 0)
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		Combat.reset(p)
 		p:LoadCharacter()
 	end
@@ -620,7 +726,7 @@ local function startRun()
 	reactorHp = Config.REACTOR_MAX_HP
 	reactorWarned = false
 	setAttr("ReactorHP", reactorHp)
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		Combat.reset(p)
 		PlayerData.addRun(p)
 		p:LoadCharacter()
@@ -636,13 +742,16 @@ local function startRun()
 			return
 		end
 		local bonus = Config.Waves.ClearBonusBase + Config.Waves.ClearBonusPerWave * wave
-		for _, p in Players:GetPlayers() do
+		for _, p in crew() do
 			Combat.addCredits(p, bonus)
 			grantXP(p, Config.XP_PER_WAVE * wave)
 			PlayerData.recordWave(p, wave)
 		end
 		R.Announce:FireAllClients("WAVE " .. wave .. " CLEARED", `+{bonus} CREDITS · UPGRADE NOW [Q]`, "clear")
 		narrate("WaveClear")
+		if wave == Config.LANDING_WAVE and stage.name == "Ship" then
+			landOnIo()
+		end
 		respawnCrew()
 		local breakTime = if wave % Config.Waves.BossEvery == 0 then Config.BOSS_BREAK_TIME else Config.BREAK_TIME
 		for t = breakTime, 1, -1 do
@@ -654,14 +763,14 @@ end
 
 while true do
 	setPhase("Lobby")
-	while #Players:GetPlayers() < Config.MIN_PLAYERS do
+	while #crew() < Config.MIN_PLAYERS do
 		task.wait(1)
 	end
 	local ready = true
 	for t = Config.LOBBY_TIME, 1, -1 do
 		setPhase("Lobby", t)
 		task.wait(1)
-		if #Players:GetPlayers() < Config.MIN_PLAYERS then
+		if #crew() < Config.MIN_PLAYERS then
 			ready = false
 			break
 		end
@@ -674,6 +783,7 @@ while true do
 			running = false
 			setAlarm(false)
 			setPower(true)
+			pcall(returnToShip)
 		end
 	end
 end

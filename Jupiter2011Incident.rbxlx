@@ -1,6 +1,7 @@
 <roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
-<Item class="Workspace" referent="RBX00000001"><Properties><string name="Name">Workspace</string></Properties></Item>
-<Item class="ReplicatedStorage" referent="RBX00000004"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX00000003"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX00000002"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="Workspace" referent="RBX00000001"><Properties><string name="Name">Workspace</string><bool name="StreamingEnabled">false</bool></Properties></Item>
+<Item class="Lighting" referent="RBX00000002"><Properties><string name="Name">Lighting</string><token name="Technology">4</token></Properties></Item>
+<Item class="ReplicatedStorage" referent="RBX00000007"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX00000006"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX00000003"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--!strict
 -- JUPITER 2011 INCIDENT — every tunable value lives here.
 
 local Config = {}
@@ -20,6 +21,11 @@ Config.REVIVE_TIME = 2.5 -- hold time to revive a crewmate
 Config.REVIVE_HEALTH = 0.4 -- revived with 40% health
 
 Config.SPACESUITS = true -- dress everyone in white spacesuits with helmets
+
+-- Io (the moon landing) ---------------------------------------------------------------
+Config.LANDING_WAVE = 10 -- after clearing this wave the ship lands on Io
+Config.MOON_GRAVITY = 0.25 -- fraction of normal gravity (Io is 0.18g; 0.25 keeps it playable)
+Config.MOON_JUMP_POWER = 32 -- with low gravity this is a long, floaty jump
 
 -- Reactor (the thing the Keis want) ---------------------------------------------
 Config.REACTOR_MAX_HP = 1000
@@ -177,13 +183,466 @@ Config.Narration = {
 	GoldenEscaped = "The golden keis got away",
 	WaveClear = "Wave cleared. The keis are regrouping",
 	GameOver = "The incident was never reported",
+	Landing = "The USS Kepler lands on Io. The keis followed the ship down",
 }
 
 return Config
 ]]></ProtectedString></Properties></Item>
+<Item class="ModuleScript" referent="RBX00000004"><Properties><string name="Name">KeisModel</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Builds a Keis model (key body, spider legs on Motor6Ds, toothy mouth, chant text, chant sound).
+-- Shared so the server (real Keis) and the client (menu scene) build the exact same creature.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+
+local KeisModel = {}
+
+local function weldTo(root: BasePart, p: BasePart)
+	p.Anchored = false
+	p.CanCollide = false
+	p.Massless = true
+	local w = Instance.new("WeldConstraint")
+	w.Part0 = root
+	w.Part1 = p
+	w.Parent = p
+end
+
+-- the "face": a ring of teeth around a fleshy throat inside the key's bow
+local function drawMouth(faceGui: SurfaceGui, def: any)
+	local flesh = Instance.new("Frame")
+	flesh.Size = UDim2.fromScale(1, 1)
+	flesh.BackgroundColor3 = if def.passive then Color3.fromRGB(255, 190, 60) else Color3.fromRGB(120, 18, 22)
+	flesh.BorderSizePixel = 0
+	flesh.Parent = faceGui
+	Instance.new("UICorner", flesh).CornerRadius = UDim.new(0.5, 0)
+	if Config.KeisFaceImage ~= "" then
+		local img = Instance.new("ImageLabel")
+		img.Size = UDim2.fromScale(1, 1)
+		img.BackgroundTransparency = 1
+		img.Image = Config.KeisFaceImage
+		img.Parent = flesh
+		Instance.new("UICorner", img).CornerRadius = UDim.new(0.5, 0)
+		return
+	end
+	local grad = Instance.new("UIGradient")
+	grad.Rotation = 90
+	grad.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(120, 120, 120))
+	grad.Parent = flesh
+	local throat = Instance.new("Frame")
+	throat.AnchorPoint = Vector2.new(0.5, 0.5)
+	throat.Position = UDim2.fromScale(0.5, 0.5)
+	throat.Size = UDim2.fromScale(0.5, 0.5)
+	throat.BackgroundColor3 = Color3.fromRGB(12, 2, 4)
+	throat.BorderSizePixel = 0
+	throat.Parent = flesh
+	Instance.new("UICorner", throat).CornerRadius = UDim.new(0.5, 0)
+	-- two rings of teeth pointing inward
+	local rings = if def.boss then { { r = 0.4, n = 18, len = 0.16 }, { r = 0.28, n = 14, len = 0.11 } } else { { r = 0.36, n = 14, len = 0.14 } }
+	for _, ring in rings do
+		for i = 1, ring.n do
+			local a = (i / ring.n) * math.pi * 2
+			local tooth = Instance.new("Frame")
+			tooth.AnchorPoint = Vector2.new(0.5, 0.5)
+			tooth.Position = UDim2.fromScale(0.5 + math.cos(a) * ring.r, 0.5 + math.sin(a) * ring.r)
+			tooth.Size = UDim2.fromScale(0.05, ring.len)
+			tooth.Rotation = math.deg(a) + 90
+			tooth.BackgroundColor3 = Color3.fromRGB(235, 228, 205)
+			tooth.BorderSizePixel = 0
+			tooth.Parent = flesh
+			local c = Instance.new("UICorner")
+			c.CornerRadius = UDim.new(0.5, 0)
+			c.Parent = tooth
+		end
+	end
+end
+
+local LEG_COLOR = Color3.fromRGB(58, 52, 50)
+
+function KeisModel.build(def: any, position: Vector3)
+	local s = def.scale
+	local model = Instance.new("Model")
+	model.Name = def.name
+
+	local HIP = 2.5 * s -- the spider legs hold the key up off the floor
+	local root = Instance.new("Part")
+	root.Name = "HumanoidRootPart"
+	root.Size = Vector3.new(2, 2, 1) * s
+	root.Transparency = 1
+	root.CanCollide = true
+	root.CFrame = CFrame.new(position + Vector3.new(0, HIP + s, 0))
+	root.Parent = model
+	model.PrimaryPart = root
+
+	local material = if def.passive then Enum.Material.Neon else Enum.Material.Metal
+	local bodyParts: { BasePart } = {}
+	local function piece(name: string, size: Vector3, offset: CFrame, color: Color3, mat: Enum.Material, shape: Enum.PartType?): Part
+		local p = Instance.new("Part")
+		p.Name = name
+		if shape then
+			p.Shape = shape
+		end
+		p.Size = size * s
+		p.Color = color
+		p.Material = mat
+		p.CFrame = root.CFrame * (offset - offset.Position + offset.Position * s)
+		p:SetAttribute("BaseColor", color)
+		p.Parent = model
+		weldTo(root, p)
+		return p
+	end
+
+	-- the key: shaft, bit (teeth) and bow
+	table.insert(bodyParts, piece("Shaft", Vector3.new(0.9, 5.5, 0.9), CFrame.new(0, 0.5, 0), def.color, material))
+	table.insert(bodyParts, piece("ToothA", Vector3.new(1.4, 0.7, 0.9), CFrame.new(0.9, -1.6, 0), def.color, material))
+	table.insert(bodyParts, piece("ToothB", Vector3.new(1.0, 0.7, 0.9), CFrame.new(0.7, -0.6, 0), def.color, material))
+	table.insert(bodyParts, piece("Collar", Vector3.new(0.6, 1.5, 1.5), CFrame.new(0, 2.9, 0) * CFrame.Angles(0, 0, math.rad(90)), def.color, material, Enum.PartType.Cylinder))
+	local bow = piece("Bow", Vector3.new(0.9, 4.8, 4.8), CFrame.new(0, 5.5, 0) * CFrame.Angles(0, math.rad(90), 0), def.color, material, Enum.PartType.Cylinder)
+	table.insert(bodyParts, bow)
+	if def.splitInto then
+		local ring = piece("Ring", Vector3.new(0.4, 3, 3), CFrame.new(0, 9, 0) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(200, 200, 210), Enum.Material.Metal, Enum.PartType.Cylinder)
+		table.insert(bodyParts, ring)
+		for i = -1, 1, 2 do
+			table.insert(bodyParts, piece("Charm", Vector3.new(0.5, 2.2, 0.5), CFrame.new(i * 2.6, 6.6, 0) * CFrame.Angles(0, 0, math.rad(i * 25)), def.color, material))
+		end
+	end
+
+	-- the mouth inside the bow (named "Face": shots here are crits)
+	local face = piece("Face", Vector3.new(3.4, 3.4, 0.1), CFrame.new(0, 5.5, -0.5), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
+	face.Transparency = 1
+	local faceGui = Instance.new("SurfaceGui")
+	faceGui.Face = Enum.NormalId.Front
+	faceGui.CanvasSize = Vector2.new(200, 200)
+	faceGui.LightInfluence = 0.5
+	faceGui.Parent = face
+	drawMouth(faceGui, def)
+
+	local glow = Instance.new("PointLight")
+	glow.Color = if def.passive then Color3.fromRGB(255, 210, 60) else Color3.fromRGB(255, 50, 40)
+	glow.Range = 10 * s
+	glow.Brightness = if def.boss then 4 else 1.2
+	glow.Parent = face
+
+	-- six spider legs. Each leg hangs on a Motor6D ("Leg1".."Leg6") that clients animate (KeisAnimator).
+	local hipY = 0.6 -- relative to the root center, before scaling
+	local upperLen, upperAngle = 3.2, math.rad(40)
+	local kneeOut, kneeUp = math.cos(upperAngle) * upperLen, math.sin(upperAngle) * upperLen
+	local footOut = kneeOut + 1.3
+	local footDown = (HIP / s + 1 + hipY) -- from hip height down to the floor
+	local legIndex = 0
+	for _, side in { 1, -1 } do
+		for _, yawDeg in { -38, 0, 38 } do
+			legIndex += 1
+			local yaw = math.rad(yawDeg) + (if side == 1 then 0 else math.pi)
+			local hip = CFrame.new(0, hipY * s, 0) * CFrame.Angles(0, yaw, 0)
+
+			local upperLocal = CFrame.new(kneeOut / 2 * s, kneeUp / 2 * s, 0) * CFrame.Angles(0, 0, upperAngle)
+			local upper = Instance.new("Part")
+			upper.Name = "LegUpper"
+			upper.Size = Vector3.new(upperLen, 0.32, 0.32) * s
+			upper.Color = LEG_COLOR
+			upper.Material = Enum.Material.Metal
+			upper.CanCollide = false
+			upper.Massless = true
+			upper.CFrame = root.CFrame * hip * upperLocal
+			upper:SetAttribute("BaseColor", LEG_COLOR)
+			upper.Parent = model
+
+			local motor = Instance.new("Motor6D")
+			motor.Name = "Leg" .. legIndex
+			motor.Part0 = root
+			motor.Part1 = upper
+			motor.C0 = hip
+			motor.C1 = upperLocal:Inverse()
+			motor:SetAttribute("Group", legIndex % 2) -- tripod gait: legs alternate in two groups
+			motor.Parent = root
+
+			local knee = Vector3.new(kneeOut, kneeUp, 0) * s
+			local foot = Vector3.new(footOut, -footDown, 0) * s
+			local lowerVec = foot - knee
+			local lowerLocal = CFrame.lookAt(knee + lowerVec / 2, foot) -- Z axis along the leg
+			local lower = Instance.new("Part")
+			lower.Name = "LegLower"
+			lower.Size = Vector3.new(0.24 * s, 0.24 * s, lowerVec.Magnitude)
+			lower.Color = LEG_COLOR
+			lower.Material = Enum.Material.Metal
+			lower.CanCollide = false
+			lower.Massless = true
+			lower.CFrame = root.CFrame * hip * lowerLocal
+			lower:SetAttribute("BaseColor", LEG_COLOR)
+			lower.Parent = model
+			local w = Instance.new("WeldConstraint")
+			w.Part0 = upper
+			w.Part1 = lower
+			w.Parent = lower
+			table.insert(bodyParts, upper)
+			table.insert(bodyParts, lower)
+		end
+	end
+
+	local humanoid = Instance.new("Humanoid")
+	humanoid.RigType = Enum.HumanoidRigType.R15 -- R15 uses HipHeight (the legs are only visual)
+	humanoid.HipHeight = HIP
+	humanoid.WalkSpeed = def.speed
+	humanoid.MaxHealth = math.huge
+	humanoid.Health = math.huge
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.BreakJointsOnDeath = false
+	humanoid.Parent = model
+	for _, state in { Enum.HumanoidStateType.Dead, Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll,
+		Enum.HumanoidStateType.Seated, Enum.HumanoidStateType.Climbing } do
+		humanoid:SetStateEnabled(state, false)
+	end
+
+	-- name, health bar, chant text
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromOffset(170, 52)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 3.2 * s, 0)
+	billboard.MaxDistance = if def.boss then 200 else 90
+	billboard.Adornee = bow
+	billboard.LightInfluence = 0
+	billboard.Parent = model
+	local chant = Instance.new("TextLabel")
+	chant.Size = UDim2.new(1, 0, 0, 22)
+	chant.BackgroundTransparency = 1
+	chant.Font = Enum.Font.Code
+	chant.TextScaled = true
+	chant.TextColor3 = if def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 70, 60)
+	chant.TextStrokeTransparency = 0.3
+	chant.Text = ""
+	chant.Parent = billboard
+	local barBack = Instance.new("Frame")
+	barBack.AnchorPoint = Vector2.new(0.5, 0)
+	barBack.Position = UDim2.new(0.5, 0, 0, 30)
+	barBack.Size = UDim2.new(if def.boss then 1 else 0.6, 0, 0, if def.boss then 10 else 6)
+	barBack.BackgroundColor3 = Color3.fromRGB(20, 15, 20)
+	barBack.BorderSizePixel = 0
+	barBack.Visible = def.boss == true
+	barBack.Parent = billboard
+	Instance.new("UICorner", barBack).CornerRadius = UDim.new(1, 0)
+	local barFill = Instance.new("Frame")
+	barFill.Size = UDim2.fromScale(1, 1)
+	barFill.BackgroundColor3 = if def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 90, 60)
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBack
+	Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
+
+	local chantId = if def.boss and Config.Sounds.BossChant ~= "" then Config.Sounds.BossChant else Config.Sounds.KeisChant
+	if chantId ~= "" and not def.passive then
+		local sound = Instance.new("Sound")
+		sound.Name = "Chant"
+		sound.SoundId = chantId
+		sound.Looped = false -- played in sync with the floating chant text (see Keis.new)
+		sound.Volume = if def.boss then 1.8 else 0.9
+		-- the boss uses the normal chant slowed down unless it has its own BossChant
+		sound:SetAttribute("BaseSpeed", if def.boss and Config.Sounds.BossChant == "" then 0.78 else 1)
+		sound.RollOffMinDistance = 8
+		sound.RollOffMaxDistance = if def.boss then 160 else 75
+		sound.RollOffMode = Enum.RollOffMode.InverseTapered
+		sound.Parent = root
+	end
+
+	return model, humanoid, root, face, bodyParts, chant, barBack, barFill
+end
+
+return KeisModel
+]]></ProtectedString></Properties></Item>
+<Item class="ModuleScript" referent="RBX00000005"><Properties><string name="Name">SpaceArt</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Jupiter, its moons and the starfield, built from parts (no assets). Shared by the ship, the moon and the menu.
+
+local SpaceArt = {}
+
+local function deco(parent: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	if shape then
+		p.Shape = shape
+	end
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+-- Jupiter's real band layout, from south pole (-1) to north pole (+1): {latitude, color}
+local PROFILE = {
+	{ -1.00, Color3.fromRGB(120, 118, 125) }, -- south polar region (blue-grey)
+	{ -0.80, Color3.fromRGB(150, 140, 135) },
+	{ -0.62, Color3.fromRGB(196, 170, 140) }, -- south temperate zone
+	{ -0.50, Color3.fromRGB(160, 112, 80) }, -- south temperate belt
+	{ -0.38, Color3.fromRGB(226, 205, 176) }, -- south tropical zone
+	{ -0.25, Color3.fromRGB(168, 104, 66) }, -- south equatorial belt
+	{ -0.15, Color3.fromRGB(196, 136, 92) },
+	{ -0.05, Color3.fromRGB(242, 228, 205) }, -- equatorial zone
+	{ 0.08, Color3.fromRGB(236, 214, 182) },
+	{ 0.18, Color3.fromRGB(150, 92, 60) }, -- north equatorial belt
+	{ 0.28, Color3.fromRGB(182, 120, 80) },
+	{ 0.38, Color3.fromRGB(230, 210, 180) }, -- north tropical zone
+	{ 0.48, Color3.fromRGB(170, 126, 92) }, -- north temperate belt
+	{ 0.60, Color3.fromRGB(205, 184, 156) },
+	{ 0.78, Color3.fromRGB(150, 140, 136) },
+	{ 1.00, Color3.fromRGB(118, 116, 124) }, -- north polar region
+}
+
+local function bandColor(lat: number): Color3
+	for i = 1, #PROFILE - 1 do
+		local a, b = PROFILE[i], PROFILE[i + 1]
+		if lat >= a[1] and lat <= b[1] then
+			local t = (lat - a[1]) / (b[1] - a[1])
+			t = t * t * (3 - 2 * t) -- smooth edges between bands
+			return a[2]:Lerp(b[2], t)
+		end
+	end
+	return PROFILE[#PROFILE][2]
+end
+
+-- Builds Jupiter facing `viewer`. sunSide = 1 lights the right side (from the viewer), -1 the left.
+function SpaceArt.jupiter(parent: Instance, center: Vector3, R: number, viewer: Vector3, sunSide: number?): Model
+	local model = Instance.new("Model")
+	model.Name = "Jupiter"
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	model.Parent = parent
+	local rng = Random.new(2011)
+
+	-- 1) banded body: thin discs stacked pole to pole, colors follow the real band profile + turbulence
+	local slices = 110
+	local t = 2 * R / slices
+	for i = 0, slices - 1 do
+		local y = -R + (i + 0.5) * t
+		local r = math.sqrt(math.max(R * R - y * y, 1))
+		local lat = y / R
+		local color = bandColor(lat + rng:NextNumber(-0.012, 0.012))
+		local shade = rng:NextNumber(0.94, 1.05)
+		color = Color3.new(math.clamp(color.R * shade, 0, 1), math.clamp(color.G * shade, 0, 1), math.clamp(color.B * shade, 0, 1))
+		deco(model, Vector3.new(t + 0.3, 2 * r, 2 * r), CFrame.new(center + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			color, Enum.Material.SmoothPlastic, Enum.PartType.Cylinder)
+	end
+
+	-- surface helpers on the visible hemisphere
+	local toViewer = viewer - center
+	local flat = Vector3.new(toViewer.X, 0, toViewer.Z).Unit
+	local right = flat:Cross(Vector3.yAxis).Unit
+	local function surfaceDir(latDeg: number, lonDeg: number): Vector3
+		local lat, lon = math.rad(latDeg), math.rad(lonDeg)
+		return ((flat * math.cos(lon) + right * math.sin(lon)) * math.cos(lat) + Vector3.yAxis * math.sin(lat)).Unit
+	end
+	local function spot(latDeg: number, lonDeg: number, radius: number, color: Color3, lift: number?)
+		local dir = surfaceDir(latDeg, lonDeg)
+		local pos = center + dir * (R * (1 + (lift or 0.002)))
+		deco(model, Vector3.new(R * 0.008, radius * 2, radius * 2), CFrame.lookAt(pos, pos + dir) * CFrame.Angles(0, math.rad(90), 0),
+			color, Enum.Material.SmoothPlastic, Enum.PartType.Cylinder)
+	end
+
+	-- 2) the Great Red Spot (layered) in the south tropical zone
+	spot(-22, -18, R * 0.15, Color3.fromRGB(226, 196, 160), 0.002)
+	spot(-22, -18, R * 0.12, Color3.fromRGB(205, 110, 70), 0.004)
+	spot(-22, -18, R * 0.085, Color3.fromRGB(180, 75, 50), 0.006)
+	spot(-22, -18, R * 0.04, Color3.fromRGB(150, 60, 45), 0.008)
+
+	-- 3) white ovals and dark festoons along the belts
+	for _ = 1, 14 do
+		spot(rng:NextNumber(-42, -32), rng:NextNumber(-60, 60), R * rng:NextNumber(0.02, 0.045), Color3.fromRGB(240, 232, 220))
+	end
+	for _ = 1, 16 do
+		spot(rng:NextNumber(8, 14), rng:NextNumber(-65, 65), R * rng:NextNumber(0.012, 0.03), Color3.fromRGB(110, 70, 55))
+	end
+	for _ = 1, 10 do
+		spot(rng:NextNumber(26, 34), rng:NextNumber(-60, 60), R * rng:NextNumber(0.015, 0.03), Color3.fromRGB(236, 222, 200))
+	end
+
+	-- 4) atmosphere haze
+	for i, a in { { 1.02, 0.9 }, { 1.05, 0.95 }, { 1.1, 0.975 } } do
+		local glow = deco(model, Vector3.one * R * 2 * a[1], CFrame.new(center), Color3.fromRGB(255, 196 - i * 10, 150 - i * 15),
+			Enum.Material.Neon, Enum.PartType.Ball)
+		glow.Transparency = a[2]
+	end
+
+	-- 5) night side: dark spheres offset sideways make a soft terminator (shadow on the side away from the sun)
+	local side = -(sunSide or 1)
+	for _, layer in { { 0.62, 0.55 }, { 0.78, 0.3 }, { 0.92, 0.08 } } do
+		local shadow = deco(model, Vector3.one * R * 2.02, CFrame.new(center + right * side * R * layer[1] + flat * R * 0.05),
+			Color3.fromRGB(4, 4, 8), Enum.Material.SmoothPlastic, Enum.PartType.Ball)
+		shadow.Transparency = layer[2]
+	end
+
+	-- 6) moons: Io, Europa, Ganymede
+	for _, m in {
+		{ offset = -right * R * 1.7 + Vector3.new(0, R * 0.3, 0), size = R * 0.07, color = Color3.fromRGB(230, 200, 110) },
+		{ offset = right * R * 1.55 - Vector3.new(0, R * 0.45, 0) - flat * R * 0.4, size = R * 0.06, color = Color3.fromRGB(225, 222, 215) },
+		{ offset = -right * R * 1.2 - Vector3.new(0, R * 0.7, 0) - flat * R * 0.8, size = R * 0.09, color = Color3.fromRGB(150, 140, 130) },
+	} do
+		local moonPos = center + m.offset
+		deco(model, Vector3.one * m.size, CFrame.new(moonPos), m.color, Enum.Material.SmoothPlastic, Enum.PartType.Ball)
+		local ms = deco(model, Vector3.one * m.size * 1.01, CFrame.new(moonPos + right * side * m.size * 0.35), Color3.fromRGB(4, 4, 8),
+			Enum.Material.SmoothPlastic, Enum.PartType.Ball)
+		ms.Transparency = 0.2
+	end
+	return model
+end
+
+-- A starfield on a sphere around `center`, skipping the patch of sky covered by Jupiter (if given).
+function SpaceArt.stars(parent: Instance, center: Vector3, radius: number, count: number, seed: number?, avoidCenter: Vector3?, avoidRadius: number?): Model
+	local model = Instance.new("Model")
+	model.Name = "Stars"
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	model.Parent = parent
+	local rng = Random.new(seed or 7)
+	local avoidDir, avoidAngle = nil, 0
+	if avoidCenter and avoidRadius then
+		local d = avoidCenter - center
+		avoidDir = d.Unit
+		avoidAngle = math.asin(math.clamp(avoidRadius / d.Magnitude, 0, 1)) + 0.06
+	end
+	local TINTS = { Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 220, 255), Color3.fromRGB(255, 240, 210), Color3.fromRGB(255, 210, 190) }
+	local galacticPole = Vector3.new(0.3, 0.8, 0.5).Unit
+
+	local function place(dir: Vector3, size: number, transparency: number)
+		if avoidDir and math.acos(math.clamp(dir:Dot(avoidDir), -1, 1)) < avoidAngle then
+			return
+		end
+		local s = deco(model, Vector3.one * size, CFrame.new(center + dir * radius), TINTS[rng:NextInteger(1, #TINTS)], Enum.Material.Neon, Enum.PartType.Ball)
+		s.Transparency = transparency
+	end
+
+	for _ = 1, count do
+		local dir = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
+		if dir.Magnitude > 0.05 then
+			local bright = rng:NextNumber() ^ 3 -- mostly small, a few bright ones
+			place(dir.Unit, radius * (0.0014 + bright * 0.004), rng:NextNumber(0, 0.35))
+		end
+	end
+	-- the Milky Way: a dense band of faint stars around a great circle
+	for _ = 1, math.floor(count * 0.7) do
+		local v = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
+		local inPlane = (v - galacticPole * v:Dot(galacticPole))
+		if inPlane.Magnitude > 0.05 then
+			local dir = (inPlane.Unit + galacticPole * rng:NextNumber(-0.12, 0.12)).Unit
+			place(dir, radius * rng:NextNumber(0.0009, 0.0018), rng:NextNumber(0.35, 0.7))
+		end
+	end
+	-- faint nebula clouds
+	for _, n in { { Color3.fromRGB(120, 80, 200), 0.6 }, { Color3.fromRGB(60, 120, 220), -0.4 }, { Color3.fromRGB(200, 80, 120), 0.1 } } do
+		local dir = (galacticPole:Cross(Vector3.xAxis).Unit * math.cos(n[2] * 3) + galacticPole:Cross(Vector3.zAxis).Unit * math.sin(n[2] * 3)).Unit
+		if not (avoidDir and dir:Dot(avoidDir) > 0.85) then
+			local cloud = deco(model, Vector3.one * math.min(radius * 0.5, 2000), CFrame.new(center + dir * radius * 1.05), n[1], Enum.Material.Neon, Enum.PartType.Ball)
+			cloud.Transparency = 0.965
+		end
+	end
+	return model
+end
+
+return SpaceArt
+]]></ProtectedString></Properties></Item>
 </Item>
 </Item>
-<Item class="ServerScriptService" referent="RBX0000000C"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX0000000B"><Properties><string name="Name">Server</string></Properties><Item class="ModuleScript" referent="RBX00000005"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ServerScriptService" referent="RBX00000010"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX0000000F"><Properties><string name="Name">Server</string></Properties><Item class="ModuleScript" referent="RBX00000008"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Weapons, credits and upgrades. The server checks every shot and purchase; clients only send intent.
 
 local Players = game:GetService("Players")
@@ -585,7 +1044,7 @@ end
 
 return Combat
 ]]></ProtectedString></Properties></Item>
-<Item class="Script" referent="RBX00000006"><Properties><string name="Name">GameManager</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="Script" referent="RBX00000009"><Properties><string name="Name">GameManager</string><ProtectedString name="Source"><![CDATA[--!strict
 -- JUPITER 2011 INCIDENT — run / wave loop.
 -- Lobby → Wave 1 → break (shop) → Wave 2 → … → the reactor falls or the whole crew is down → Game Over → Lobby.
 
@@ -599,6 +1058,8 @@ local Keis = require(script.Parent:WaitForChild("KeisAI"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local Combat = require(script.Parent:WaitForChild("Combat"))
 local Suit = require(script.Parent:WaitForChild("Suit"))
+local MoonBuilder = require(script.Parent:WaitForChild("MoonBuilder"))
+local ServerStorage = game:GetService("ServerStorage")
 
 -- Remotes ---------------------------------------------------------------------------------
 local remotes = Instance.new("Folder")
@@ -615,7 +1076,8 @@ for _, name in {
 	"LevelUp", -- (level, title)
 	"GameOver", -- (summary)
 	"Purchased", -- (id)
-	"Shoot", "Reload", "BuyUpgrade", "RepairReactor", -- client → server
+	"Transition", -- (text, seconds) fade to black and back
+	"Shoot", "Reload", "BuyUpgrade", "RepairReactor", "PlayRequest", -- client → server
 } do
 	local r = Instance.new("RemoteEvent")
 	r.Name = name
@@ -630,6 +1092,17 @@ end
 local function setPhase(phase: string, timeLeft: number?)
 	setAttr("Phase", phase)
 	setAttr("TimeLeft", timeLeft or 0)
+end
+
+-- players who pressed PLAY in the menu
+local function crew(): { Player }
+	local list = {}
+	for _, p in Players:GetPlayers() do
+		if p:GetAttribute("InGame") then
+			table.insert(list, p)
+		end
+	end
+	return list
 end
 
 local function narrate(key: string, name: string?)
@@ -661,12 +1134,23 @@ setAttr("Alarm", false)
 setPhase("Lobby")
 
 -- Reactor visuals: rings spin, core shifts from cyan to red as it takes damage
+-- the current stage: the ship, or Io after wave 10
+type Stage = { name: string, spawn: SpawnLocation, reactor: BasePart, reactorRadius: number, vents: { Vector3 }, roomCenters: { Vector3 } }
+local shipStage: Stage = { name = "Ship", spawn = ship.spawn, reactor = ship.reactor, reactorRadius = ship.reactorRadius,
+	vents = ship.vents, roomCenters = ship.roomCenters }
+local stage: Stage = shipStage
+local moon: any = nil
+
 local rings = {}
-for _, d in ship.reactor.Parent:GetChildren() do
-	if d.Name == "ReactorRing" then
-		table.insert(rings, { part = d :: BasePart, base = (d :: BasePart).CFrame, speed = (#rings + 1) * 0.6 * (if #rings % 2 == 0 then 1 else -1) })
+local function collectRings()
+	rings = {}
+	for _, d in (stage.reactor.Parent :: Instance):GetChildren() do
+		if d.Name == "ReactorRing" then
+			table.insert(rings, { part = d :: BasePart, base = (d :: BasePart).CFrame, speed = (#rings + 1) * 0.6 * (if #rings % 2 == 0 then 1 else -1) })
+		end
 	end
 end
+collectRings()
 task.spawn(function()
 	local angle = 0
 	while true do
@@ -675,10 +1159,13 @@ task.spawn(function()
 			r.part.CFrame = r.base * CFrame.Angles(0, math.sin(angle * r.speed) * 0.45, 0) -- gyroscope wobble
 		end
 		local frac = reactorHp / Config.REACTOR_MAX_HP
-		ship.reactor.Color = Color3.fromRGB(90, 220, 255):Lerp(Color3.fromRGB(255, 50, 40), 1 - frac)
-		local l = ship.reactor:FindFirstChildOfClass("PointLight")
-		if l then
-			l.Color = ship.reactor.Color
+		local core = stage.reactor
+		if core.Parent then
+			core.Color = Color3.fromRGB(90, 220, 255):Lerp(Color3.fromRGB(255, 50, 40), 1 - frac)
+			local l = core:FindFirstChildOfClass("PointLight")
+			if l then
+				l.Color = core.Color
+			end
 		end
 		task.wait(0.05)
 	end
@@ -755,7 +1242,7 @@ end
 
 local function aliveCrew(): number
 	local n = 0
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		if crewStatus(p) == "alive" then
 			n += 1
 		end
@@ -871,6 +1358,8 @@ local function onCharacter(player: Player, character: Model)
 	Combat.applyCharacter(player, character)
 	local humanoid = character:WaitForChild("Humanoid", 5) :: Humanoid?
 	if humanoid then
+		humanoid.UseJumpPower = true
+		humanoid.JumpPower = if stage.name == "Moon" then Config.MOON_JUMP_POWER else 50
 		humanoid.Died:Connect(function()
 			player:SetAttribute("Downed", false)
 			if running then
@@ -879,7 +1368,7 @@ local function onCharacter(player: Player, character: Model)
 				-- comes back at the next break
 			else
 				task.delay(3, function()
-					if player.Parent and not running then
+					if player.Parent and not running and player:GetAttribute("InGame") then
 						player:LoadCharacter()
 					end
 				end)
@@ -900,8 +1389,18 @@ local function onPlayerAdded(player: Player)
 			Suit.apply(character)
 		end
 	end)
-	player:LoadCharacter()
+	-- the character spawns when the player presses PLAY in the menu (PlayRequest)
 end
+R.PlayRequest.OnServerEvent:Connect(function(player)
+	if player:GetAttribute("InGame") then
+		return
+	end
+	player:SetAttribute("InGame", true)
+	player:LoadCharacter()
+	if running then
+		R.Notify:FireAllClients(`{player.DisplayName} joined the crew`, "cyan")
+	end
+end)
 Players.PlayerAdded:Connect(onPlayerAdded)
 for _, p in Players:GetPlayers() do
 	task.spawn(onPlayerAdded, p)
@@ -918,8 +1417,17 @@ end)
 
 -- Keis wiring ----------------------------------------------------------------------------------
 local function spawnKeis(typeId: string, at: Vector3?, hpScale: number)
-	local pos = at or ship.vents[rng:NextInteger(1, #ship.vents)]
+	local pos = at or stage.vents[rng:NextInteger(1, #stage.vents)]
 	pos += Vector3.new(rng:NextNumber(-1.5, 1.5), 0, rng:NextNumber(-1.5, 1.5))
+	if stage.name == "Moon" then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { keisFolder }
+		local hit = workspace:Raycast(pos + Vector3.new(0, 80, 0), Vector3.new(0, -200, 0), params)
+		if hit then
+			pos = hit.Position + Vector3.new(0, 3, 0)
+		end
+	end
 	return Keis.new(typeId, pos, hpScale)
 end
 
@@ -930,7 +1438,7 @@ Keis.hooks.reactorRadius = ship.reactorRadius
 Keis.hooks.roomCenters = ship.roomCenters
 Keis.hooks.getTargets = function(): { Model }
 	local list = {}
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		if crewStatus(p) == "alive" and p.Character then
 			table.insert(list, p.Character)
 		end
@@ -978,7 +1486,7 @@ Keis.hooks.onKilled = function(k, killer: Player?)
 			R.CrewAction:FireAllClients(killer.UserId, "*Catches the golden keis*")
 		elseif def.boss then
 			R.Announce:FireAllClients("MASTER KEIS DESTROYED", killer.DisplayName .. " landed the final shot", "gold")
-			for _, p in Players:GetPlayers() do
+			for _, p in crew() do
 				Combat.addCredits(p, 50)
 			end
 		end
@@ -1069,7 +1577,7 @@ end
 
 local function randomCrewName(): string?
 	local names = {}
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		if crewStatus(p) == "alive" then
 			table.insert(names, p.DisplayName)
 		end
@@ -1080,7 +1588,7 @@ end
 local function runWave(n: number): (boolean, string)
 	local W = Config.Waves
 	local isBoss = n % W.BossEvery == 0
-	local playerCount = math.max(1, #Players:GetPlayers())
+	local playerCount = math.max(1, #crew())
 	local count = math.floor((W.BaseCount + W.CountPerWave * (n - 1)) * (1 + (playerCount - 1) * W.ExtraPlayerMultiplier))
 	if isBoss then
 		count = math.floor(count * 0.6)
@@ -1115,7 +1623,7 @@ local function runWave(n: number): (boolean, string)
 			result, reason = false, "THE REACTOR WAS DESTROYED"
 			break
 		end
-		if #Players:GetPlayers() == 0 then
+		if #crew() == 0 then
 			result, reason = false, "THE SHIP WAS ABANDONED"
 			break
 		end
@@ -1159,8 +1667,64 @@ local function runWave(n: number): (boolean, string)
 	return result, reason
 end
 
+local function applyStage(newStage: Stage)
+	stage = newStage
+	setAttr("Stage", newStage.name)
+	Keis.hooks.reactor = newStage.reactor
+	Keis.hooks.reactorRadius = newStage.reactorRadius
+	Keis.hooks.roomCenters = newStage.roomCenters
+	ship.spawn.Enabled = newStage.name == "Ship"
+	if moon then
+		moon.spawn.Enabled = newStage.name == "Moon"
+	end
+	-- only one Jupiter in the sky at a time
+	for _, m in ship.space do
+		m.Parent = if newStage.name == "Ship" then ship.folder else ServerStorage
+	end
+	workspace.Gravity = if newStage.name == "Moon" then 196.2 * Config.MOON_GRAVITY else 196.2
+	for _, p in crew() do
+		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.UseJumpPower = true
+			humanoid.JumpPower = if newStage.name == "Moon" then Config.MOON_JUMP_POWER else 50
+		end
+	end
+	collectRings()
+end
+
+local function landOnIo()
+	R.Transition:FireAllClients("DESCENDING TO IO", 4)
+	task.wait(1.2) -- screens are black now
+	if not moon then
+		moon = MoonBuilder.build()
+	end
+	applyStage({ name = "Moon", spawn = moon.spawn, reactor = moon.reactor, reactorRadius = moon.reactorRadius,
+		vents = moon.vents, roomCenters = moon.roomCenters })
+	reactorHp = Config.REACTOR_MAX_HP
+	reactorWarned = false
+	setAttr("ReactorHP", reactorHp)
+	for _, p in crew() do
+		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			p.Character:PivotTo(moon.spawn.CFrame + Vector3.new(rng:NextNumber(-4, 4), 4, rng:NextNumber(-3, 3)))
+		end
+	end
+	R.Announce:FireAllClients("IO", "JUPITER'S VOLCANIC MOON · LOW GRAVITY · DEFEND THE GENERATOR", "gold")
+	narrate("Landing")
+end
+
+local function returnToShip()
+	if stage.name ~= "Ship" then
+		applyStage(shipStage)
+	end
+	if moon then
+		MoonBuilder.clear()
+		moon = nil
+	end
+end
+
 local function respawnCrew()
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
 		if p:GetAttribute("Downed") then
 			revive(p, nil)
@@ -1176,7 +1740,7 @@ local function gameOver(reason: string)
 	setPower(true)
 	local summary = { wave = wave, reason = reason, crew = {} :: { any }, mvp = 0 }
 	local bestKills = -1
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		local kills, damage = Combat.getRunStats(p)
 		table.insert(summary.crew, { userId = p.UserId, name = p.DisplayName, kills = kills, damage = damage,
 			level = p:GetAttribute("Level") or 1 })
@@ -1191,11 +1755,12 @@ local function gameOver(reason: string)
 	setPhase("GameOver", Config.GAMEOVER_TIME)
 	task.wait(Config.GAMEOVER_TIME)
 	running = false
+	returnToShip()
 	reactorHp = Config.REACTOR_MAX_HP
 	setAttr("ReactorHP", reactorHp)
 	setAttr("Wave", 0)
 	setAttr("KeisLeft", 0)
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		Combat.reset(p)
 		p:LoadCharacter()
 	end
@@ -1207,7 +1772,7 @@ local function startRun()
 	reactorHp = Config.REACTOR_MAX_HP
 	reactorWarned = false
 	setAttr("ReactorHP", reactorHp)
-	for _, p in Players:GetPlayers() do
+	for _, p in crew() do
 		Combat.reset(p)
 		PlayerData.addRun(p)
 		p:LoadCharacter()
@@ -1223,13 +1788,16 @@ local function startRun()
 			return
 		end
 		local bonus = Config.Waves.ClearBonusBase + Config.Waves.ClearBonusPerWave * wave
-		for _, p in Players:GetPlayers() do
+		for _, p in crew() do
 			Combat.addCredits(p, bonus)
 			grantXP(p, Config.XP_PER_WAVE * wave)
 			PlayerData.recordWave(p, wave)
 		end
 		R.Announce:FireAllClients("WAVE " .. wave .. " CLEARED", `+{bonus} CREDITS · UPGRADE NOW [Q]`, "clear")
 		narrate("WaveClear")
+		if wave == Config.LANDING_WAVE and stage.name == "Ship" then
+			landOnIo()
+		end
 		respawnCrew()
 		local breakTime = if wave % Config.Waves.BossEvery == 0 then Config.BOSS_BREAK_TIME else Config.BREAK_TIME
 		for t = breakTime, 1, -1 do
@@ -1241,14 +1809,14 @@ end
 
 while true do
 	setPhase("Lobby")
-	while #Players:GetPlayers() < Config.MIN_PLAYERS do
+	while #crew() < Config.MIN_PLAYERS do
 		task.wait(1)
 	end
 	local ready = true
 	for t = Config.LOBBY_TIME, 1, -1 do
 		setPhase("Lobby", t)
 		task.wait(1)
-		if #Players:GetPlayers() < Config.MIN_PLAYERS then
+		if #crew() < Config.MIN_PLAYERS then
 			ready = false
 			break
 		end
@@ -1261,11 +1829,12 @@ while true do
 			running = false
 			setAlarm(false)
 			setPower(true)
+			pcall(returnToShip)
 		end
 	end
 end
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX00000007"><Properties><string name="Name">KeisAI</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000A"><Properties><string name="Name">KeisAI</string><ProtectedString name="Source"><![CDATA[--!strict
 -- The Keis: key-shaped entities with faces that chant "keis keis keis o algo o algo".
 -- They crawl out of the vents and go for the reactor, or for any crew member who gets close.
 
@@ -1297,252 +1866,9 @@ Keis.hooks = {
 	onExpired = function(_keis: any) end,
 }
 
-local function weldTo(root: BasePart, p: BasePart)
-	p.Anchored = false
-	p.CanCollide = false
-	p.Massless = true
-	local w = Instance.new("WeldConstraint")
-	w.Part0 = root
-	w.Part1 = p
-	w.Parent = p
-end
+local KeisModel = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("KeisModel"))
+local buildModel = KeisModel.build
 
--- the "face": a ring of teeth around a fleshy throat inside the key's bow
-local function drawMouth(faceGui: SurfaceGui, def: any)
-	local flesh = Instance.new("Frame")
-	flesh.Size = UDim2.fromScale(1, 1)
-	flesh.BackgroundColor3 = if def.passive then Color3.fromRGB(255, 190, 60) else Color3.fromRGB(120, 18, 22)
-	flesh.BorderSizePixel = 0
-	flesh.Parent = faceGui
-	Instance.new("UICorner", flesh).CornerRadius = UDim.new(0.5, 0)
-	if Config.KeisFaceImage ~= "" then
-		local img = Instance.new("ImageLabel")
-		img.Size = UDim2.fromScale(1, 1)
-		img.BackgroundTransparency = 1
-		img.Image = Config.KeisFaceImage
-		img.Parent = flesh
-		Instance.new("UICorner", img).CornerRadius = UDim.new(0.5, 0)
-		return
-	end
-	local grad = Instance.new("UIGradient")
-	grad.Rotation = 90
-	grad.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(120, 120, 120))
-	grad.Parent = flesh
-	local throat = Instance.new("Frame")
-	throat.AnchorPoint = Vector2.new(0.5, 0.5)
-	throat.Position = UDim2.fromScale(0.5, 0.5)
-	throat.Size = UDim2.fromScale(0.5, 0.5)
-	throat.BackgroundColor3 = Color3.fromRGB(12, 2, 4)
-	throat.BorderSizePixel = 0
-	throat.Parent = flesh
-	Instance.new("UICorner", throat).CornerRadius = UDim.new(0.5, 0)
-	-- two rings of teeth pointing inward
-	local rings = if def.boss then { { r = 0.4, n = 18, len = 0.16 }, { r = 0.28, n = 14, len = 0.11 } } else { { r = 0.36, n = 14, len = 0.14 } }
-	for _, ring in rings do
-		for i = 1, ring.n do
-			local a = (i / ring.n) * math.pi * 2
-			local tooth = Instance.new("Frame")
-			tooth.AnchorPoint = Vector2.new(0.5, 0.5)
-			tooth.Position = UDim2.fromScale(0.5 + math.cos(a) * ring.r, 0.5 + math.sin(a) * ring.r)
-			tooth.Size = UDim2.fromScale(0.05, ring.len)
-			tooth.Rotation = math.deg(a) + 90
-			tooth.BackgroundColor3 = Color3.fromRGB(235, 228, 205)
-			tooth.BorderSizePixel = 0
-			tooth.Parent = flesh
-			local c = Instance.new("UICorner")
-			c.CornerRadius = UDim.new(0.5, 0)
-			c.Parent = tooth
-		end
-	end
-end
-
-local LEG_COLOR = Color3.fromRGB(58, 52, 50)
-
-local function buildModel(def: any, position: Vector3)
-	local s = def.scale
-	local model = Instance.new("Model")
-	model.Name = def.name
-
-	local HIP = 2.5 * s -- the spider legs hold the key up off the floor
-	local root = Instance.new("Part")
-	root.Name = "HumanoidRootPart"
-	root.Size = Vector3.new(2, 2, 1) * s
-	root.Transparency = 1
-	root.CanCollide = true
-	root.CFrame = CFrame.new(position + Vector3.new(0, HIP + s, 0))
-	root.Parent = model
-	model.PrimaryPart = root
-
-	local material = if def.passive then Enum.Material.Neon else Enum.Material.Metal
-	local bodyParts: { BasePart } = {}
-	local function piece(name: string, size: Vector3, offset: CFrame, color: Color3, mat: Enum.Material, shape: Enum.PartType?): Part
-		local p = Instance.new("Part")
-		p.Name = name
-		if shape then
-			p.Shape = shape
-		end
-		p.Size = size * s
-		p.Color = color
-		p.Material = mat
-		p.CFrame = root.CFrame * (offset - offset.Position + offset.Position * s)
-		p:SetAttribute("BaseColor", color)
-		p.Parent = model
-		weldTo(root, p)
-		return p
-	end
-
-	-- the key: shaft, bit (teeth) and bow
-	table.insert(bodyParts, piece("Shaft", Vector3.new(0.9, 5.5, 0.9), CFrame.new(0, 0.5, 0), def.color, material))
-	table.insert(bodyParts, piece("ToothA", Vector3.new(1.4, 0.7, 0.9), CFrame.new(0.9, -1.6, 0), def.color, material))
-	table.insert(bodyParts, piece("ToothB", Vector3.new(1.0, 0.7, 0.9), CFrame.new(0.7, -0.6, 0), def.color, material))
-	table.insert(bodyParts, piece("Collar", Vector3.new(0.6, 1.5, 1.5), CFrame.new(0, 2.9, 0) * CFrame.Angles(0, 0, math.rad(90)), def.color, material, Enum.PartType.Cylinder))
-	local bow = piece("Bow", Vector3.new(0.9, 4.8, 4.8), CFrame.new(0, 5.5, 0) * CFrame.Angles(0, math.rad(90), 0), def.color, material, Enum.PartType.Cylinder)
-	table.insert(bodyParts, bow)
-	if def.splitInto then
-		local ring = piece("Ring", Vector3.new(0.4, 3, 3), CFrame.new(0, 9, 0) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(200, 200, 210), Enum.Material.Metal, Enum.PartType.Cylinder)
-		table.insert(bodyParts, ring)
-		for i = -1, 1, 2 do
-			table.insert(bodyParts, piece("Charm", Vector3.new(0.5, 2.2, 0.5), CFrame.new(i * 2.6, 6.6, 0) * CFrame.Angles(0, 0, math.rad(i * 25)), def.color, material))
-		end
-	end
-
-	-- the mouth inside the bow (named "Face": shots here are crits)
-	local face = piece("Face", Vector3.new(3.4, 3.4, 0.1), CFrame.new(0, 5.5, -0.5), Color3.new(0, 0, 0), Enum.Material.SmoothPlastic)
-	face.Transparency = 1
-	local faceGui = Instance.new("SurfaceGui")
-	faceGui.Face = Enum.NormalId.Front
-	faceGui.CanvasSize = Vector2.new(200, 200)
-	faceGui.LightInfluence = 0.5
-	faceGui.Parent = face
-	drawMouth(faceGui, def)
-
-	local glow = Instance.new("PointLight")
-	glow.Color = if def.passive then Color3.fromRGB(255, 210, 60) else Color3.fromRGB(255, 50, 40)
-	glow.Range = 10 * s
-	glow.Brightness = if def.boss then 4 else 1.2
-	glow.Parent = face
-
-	-- six spider legs. Each leg hangs on a Motor6D ("Leg1".."Leg6") that clients animate (KeisAnimator).
-	local hipY = 0.6 -- relative to the root center, before scaling
-	local upperLen, upperAngle = 3.2, math.rad(40)
-	local kneeOut, kneeUp = math.cos(upperAngle) * upperLen, math.sin(upperAngle) * upperLen
-	local footOut = kneeOut + 1.3
-	local footDown = (HIP / s + 1 + hipY) -- from hip height down to the floor
-	local legIndex = 0
-	for _, side in { 1, -1 } do
-		for _, yawDeg in { -38, 0, 38 } do
-			legIndex += 1
-			local yaw = math.rad(yawDeg) + (if side == 1 then 0 else math.pi)
-			local hip = CFrame.new(0, hipY * s, 0) * CFrame.Angles(0, yaw, 0)
-
-			local upperLocal = CFrame.new(kneeOut / 2 * s, kneeUp / 2 * s, 0) * CFrame.Angles(0, 0, upperAngle)
-			local upper = Instance.new("Part")
-			upper.Name = "LegUpper"
-			upper.Size = Vector3.new(upperLen, 0.32, 0.32) * s
-			upper.Color = LEG_COLOR
-			upper.Material = Enum.Material.Metal
-			upper.CanCollide = false
-			upper.Massless = true
-			upper.CFrame = root.CFrame * hip * upperLocal
-			upper:SetAttribute("BaseColor", LEG_COLOR)
-			upper.Parent = model
-
-			local motor = Instance.new("Motor6D")
-			motor.Name = "Leg" .. legIndex
-			motor.Part0 = root
-			motor.Part1 = upper
-			motor.C0 = hip
-			motor.C1 = upperLocal:Inverse()
-			motor:SetAttribute("Group", legIndex % 2) -- tripod gait: legs alternate in two groups
-			motor.Parent = root
-
-			local knee = Vector3.new(kneeOut, kneeUp, 0) * s
-			local foot = Vector3.new(footOut, -footDown, 0) * s
-			local lowerVec = foot - knee
-			local lowerLocal = CFrame.lookAt(knee + lowerVec / 2, foot) -- Z axis along the leg
-			local lower = Instance.new("Part")
-			lower.Name = "LegLower"
-			lower.Size = Vector3.new(0.24 * s, 0.24 * s, lowerVec.Magnitude)
-			lower.Color = LEG_COLOR
-			lower.Material = Enum.Material.Metal
-			lower.CanCollide = false
-			lower.Massless = true
-			lower.CFrame = root.CFrame * hip * lowerLocal
-			lower:SetAttribute("BaseColor", LEG_COLOR)
-			lower.Parent = model
-			local w = Instance.new("WeldConstraint")
-			w.Part0 = upper
-			w.Part1 = lower
-			w.Parent = lower
-			table.insert(bodyParts, upper)
-			table.insert(bodyParts, lower)
-		end
-	end
-
-	local humanoid = Instance.new("Humanoid")
-	humanoid.RigType = Enum.HumanoidRigType.R15 -- R15 uses HipHeight (the legs are only visual)
-	humanoid.HipHeight = HIP
-	humanoid.WalkSpeed = def.speed
-	humanoid.MaxHealth = math.huge
-	humanoid.Health = math.huge
-	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-	humanoid.BreakJointsOnDeath = false
-	humanoid.Parent = model
-	for _, state in { Enum.HumanoidStateType.Dead, Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll,
-		Enum.HumanoidStateType.Seated, Enum.HumanoidStateType.Climbing } do
-		humanoid:SetStateEnabled(state, false)
-	end
-
-	-- name, health bar, chant text
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(170, 52)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 3.2 * s, 0)
-	billboard.MaxDistance = if def.boss then 200 else 90
-	billboard.Adornee = bow
-	billboard.LightInfluence = 0
-	billboard.Parent = model
-	local chant = Instance.new("TextLabel")
-	chant.Size = UDim2.new(1, 0, 0, 22)
-	chant.BackgroundTransparency = 1
-	chant.Font = Enum.Font.Code
-	chant.TextScaled = true
-	chant.TextColor3 = if def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 70, 60)
-	chant.TextStrokeTransparency = 0.3
-	chant.Text = ""
-	chant.Parent = billboard
-	local barBack = Instance.new("Frame")
-	barBack.AnchorPoint = Vector2.new(0.5, 0)
-	barBack.Position = UDim2.new(0.5, 0, 0, 30)
-	barBack.Size = UDim2.new(if def.boss then 1 else 0.6, 0, 0, if def.boss then 10 else 6)
-	barBack.BackgroundColor3 = Color3.fromRGB(20, 15, 20)
-	barBack.BorderSizePixel = 0
-	barBack.Visible = def.boss == true
-	barBack.Parent = billboard
-	Instance.new("UICorner", barBack).CornerRadius = UDim.new(1, 0)
-	local barFill = Instance.new("Frame")
-	barFill.Size = UDim2.fromScale(1, 1)
-	barFill.BackgroundColor3 = if def.passive then Color3.fromRGB(255, 215, 70) else Color3.fromRGB(255, 90, 60)
-	barFill.BorderSizePixel = 0
-	barFill.Parent = barBack
-	Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
-
-	local chantId = if def.boss and Config.Sounds.BossChant ~= "" then Config.Sounds.BossChant else Config.Sounds.KeisChant
-	if chantId ~= "" and not def.passive then
-		local sound = Instance.new("Sound")
-		sound.Name = "Chant"
-		sound.SoundId = chantId
-		sound.Looped = false -- played in sync with the floating chant text (see Keis.new)
-		sound.Volume = if def.boss then 1.8 else 0.9
-		-- the boss uses the normal chant slowed down unless it has its own BossChant
-		sound:SetAttribute("BaseSpeed", if def.boss and Config.Sounds.BossChant == "" then 0.78 else 1)
-		sound.RollOffMinDistance = 8
-		sound.RollOffMaxDistance = if def.boss then 160 else 75
-		sound.RollOffMode = Enum.RollOffMode.InverseTapered
-		sound.Parent = root
-	end
-
-	return model, humanoid, root, face, bodyParts, chant, barBack, barFill
-end
 
 function Keis.new(typeId: string, position: Vector3, hpScale: number)
 	local def = (Config.KeisTypes :: any)[typeId]
@@ -1868,7 +2194,330 @@ end
 
 return Keis
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX00000008"><Properties><string name="Name">PlayerData</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000B"><Properties><string name="Name">MoonBuilder</string><ProtectedString name="Source"><![CDATA[--!strict
+-- IO: Jupiter's volcanic moon. Built with Terrain + parts after the crew survives wave 10.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local SpaceArt = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpaceArt"))
+
+local MoonBuilder = {}
+
+MoonBuilder.ORIGIN = Vector3.new(0, 0, -3200)
+local SIZE = 420
+local SMOKE = "rbxasset://textures/particles/smoke_main.dds"
+local FIRE = "rbxasset://textures/particles/fire_main.dds"
+
+local function part(parent: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	if shape then
+		p.Shape = shape
+	end
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+local function deco(parent: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?): Part
+	local p = part(parent, size, cf, color, material, shape)
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CastShadow = false
+	return p
+end
+
+local function emitter(parent: Instance, props: { [string]: any })
+	local e = Instance.new("ParticleEmitter")
+	for k, v in props do
+		(e :: any)[k] = v
+	end
+	e.Parent = parent
+end
+
+export type MoonInfo = {
+	folder: Folder,
+	spawn: SpawnLocation,
+	reactor: BasePart,
+	reactorRadius: number,
+	vents: { Vector3 },
+	roomCenters: { Vector3 },
+	space: { Instance },
+}
+
+function MoonBuilder.clear()
+	local old = workspace:FindFirstChild("Io")
+	if old then
+		old:Destroy()
+	end
+	local M = MoonBuilder.ORIGIN
+	workspace.Terrain:FillBlock(CFrame.new(M + Vector3.new(0, 20, 0)), Vector3.new(SIZE + 120, 200, SIZE + 120), Enum.Material.Air)
+end
+
+function MoonBuilder.build(): MoonInfo
+	MoonBuilder.clear()
+	local M = MoonBuilder.ORIGIN
+	local T = workspace.Terrain
+	local rng = Random.new(1610) -- Io was discovered in 1610
+
+	T:SetMaterialColor(Enum.Material.Basalt, Color3.fromRGB(62, 50, 40))
+	T:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(150, 108, 58))
+	T:SetMaterialColor(Enum.Material.Sand, Color3.fromRGB(222, 196, 88)) -- sulfur
+	T:SetMaterialColor(Enum.Material.Salt, Color3.fromRGB(238, 232, 196)) -- sulfur dioxide frost
+	T:SetMaterialColor(Enum.Material.Ground, Color3.fromRGB(176, 92, 42))
+	T:SetMaterialColor(Enum.Material.CrackedLava, Color3.fromRGB(70, 40, 30))
+
+	local folder = Instance.new("Folder")
+	folder.Name = "Io"
+	folder.Parent = workspace
+
+	-- base ground
+	T:FillBlock(CFrame.new(M + Vector3.new(0, -12, 0)), Vector3.new(SIZE, 24, SIZE), Enum.Material.Basalt)
+	-- rolling mounds
+	local mats = { Enum.Material.Rock, Enum.Material.Sand, Enum.Material.Ground, Enum.Material.Basalt }
+	for _ = 1, 70 do
+		local r = rng:NextNumber(8, 28)
+		local p = M + Vector3.new(rng:NextNumber(-190, 190), -r * rng:NextNumber(0.55, 0.85), rng:NextNumber(-190, 190))
+		T:FillBall(p, r, mats[rng:NextInteger(1, #mats)])
+	end
+	-- sulfur / frost patches on the surface
+	for _ = 1, 26 do
+		local p = M + Vector3.new(rng:NextNumber(-190, 190), -0.6, rng:NextNumber(-190, 190))
+		T:FillCylinder(CFrame.new(p), 2, rng:NextNumber(8, 22), if rng:NextNumber() < 0.6 then Enum.Material.Sand else Enum.Material.Salt)
+	end
+	-- impact craters with raised rims
+	for _ = 1, 12 do
+		local r = rng:NextNumber(10, 26)
+		local c = M + Vector3.new(rng:NextNumber(-170, 170), 0, rng:NextNumber(-170, -40) * (if rng:NextNumber() < 0.5 then 1 else -1))
+		T:FillBall(c + Vector3.new(0, r * 0.45, 0), r, Enum.Material.Air)
+		for k = 1, 12 do
+			local a = k / 12 * math.pi * 2
+			T:FillBall(c + Vector3.new(math.cos(a) * r * 1.05, -1, math.sin(a) * r * 1.05), r * 0.3, Enum.Material.Rock)
+		end
+	end
+	-- lava lakes
+	for _ = 1, 3 do
+		local c = M + Vector3.new(rng:NextNumber(-150, 150), 0, rng:NextNumber(-170, -80))
+		local r = rng:NextNumber(10, 16)
+		T:FillCylinder(CFrame.new(c + Vector3.new(0, 2, 0)), 8, r, Enum.Material.Air)
+		T:FillCylinder(CFrame.new(c + Vector3.new(0, -2.5, 0)), 3, r, Enum.Material.CrackedLava)
+		local glow = deco(folder, Vector3.new(0.2, r * 1.8, r * 1.8), CFrame.new(c + Vector3.new(0, -0.9, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			Color3.fromRGB(255, 110, 30), Enum.Material.Neon, Enum.PartType.Cylinder)
+		glow.Transparency = 0.35
+		local l = Instance.new("PointLight")
+		l.Color = Color3.fromRGB(255, 120, 40)
+		l.Range = 40
+		l.Brightness = 2
+		l.Parent = glow
+	end
+	-- the volcano (Loki-style), with a glowing crater and a smoke plume
+	local V = M + Vector3.new(-120, 0, -150)
+	for i = 0, 7 do
+		T:FillCylinder(CFrame.new(V + Vector3.new(0, i * 6 + 3, 0)), 6, 62 - i * 7, Enum.Material.Basalt)
+	end
+	T:FillBall(V + Vector3.new(0, 52, 0), 12, Enum.Material.Air)
+	T:FillCylinder(CFrame.new(V + Vector3.new(0, 42, 0)), 3, 9, Enum.Material.CrackedLava)
+	local vent = deco(folder, Vector3.new(14, 1, 14), CFrame.new(V + Vector3.new(0, 44, 0)), Color3.fromRGB(255, 120, 30), Enum.Material.Neon)
+	vent.Transparency = 0.2
+	local vl = Instance.new("PointLight")
+	vl.Color = Color3.fromRGB(255, 120, 40)
+	vl.Range = 60
+	vl.Brightness = 3
+	vl.Parent = vent
+	emitter(vent, { Texture = FIRE, Rate = 25, Lifetime = NumberRange.new(1, 2), Speed = NumberRange.new(10, 20), SpreadAngle = Vector2.new(20, 20),
+		Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 6), NumberSequenceKeypoint.new(1, 1) }), LightEmission = 1,
+		Color = ColorSequence.new(Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 60, 20)), EmissionDirection = Enum.NormalId.Top })
+	emitter(vent, { Texture = SMOKE, Rate = 10, Lifetime = NumberRange.new(8, 12), Speed = NumberRange.new(14, 22), SpreadAngle = Vector2.new(15, 15),
+		Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 10), NumberSequenceKeypoint.new(1, 40) }), RotSpeed = NumberRange.new(-20, 20),
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.3), NumberSequenceKeypoint.new(1, 1) }),
+		Color = ColorSequence.new(Color3.fromRGB(200, 180, 140)), EmissionDirection = Enum.NormalId.Top, Acceleration = Vector3.new(4, 2, 0) })
+
+	-- flat landing zone (cleared last so nothing pokes through)
+	local LZ = M + Vector3.new(0, 0, 40)
+	T:FillCylinder(CFrame.new(LZ + Vector3.new(0, 20, 0)), 40, 62, Enum.Material.Air)
+	T:FillCylinder(CFrame.new(LZ + Vector3.new(0, -2, 0)), 4, 62, Enum.Material.Basalt)
+	T:FillCylinder(CFrame.new(LZ + Vector3.new(0, -0.4, 0)), 0.8, 30, Enum.Material.Ground)
+
+	-- boulders + sulfur crystals
+	for _ = 1, 55 do
+		local p = M + Vector3.new(rng:NextNumber(-195, 195), 0, rng:NextNumber(-195, 195))
+		if (p - LZ).Magnitude > 70 then
+			local s = rng:NextNumber(2, 8)
+			part(folder, Vector3.new(s, s * rng:NextNumber(0.5, 1), s * rng:NextNumber(0.7, 1.3)),
+				CFrame.new(p + Vector3.new(0, s * 0.2, 0)) * CFrame.Angles(rng:NextNumber(0, 1), rng:NextNumber(0, 6), rng:NextNumber(0, 1)),
+				Color3.fromRGB(rng:NextInteger(70, 110), rng:NextInteger(55, 80), rng:NextInteger(40, 55)), Enum.Material.Basalt)
+		end
+	end
+	for _ = 1, 30 do
+		local p = M + Vector3.new(rng:NextNumber(-190, 190), 0, rng:NextNumber(-190, 190))
+		if (p - LZ).Magnitude > 70 then
+			for k = 1, 3 do
+				deco(folder, Vector3.new(0.6, rng:NextNumber(1.5, 3.5), 0.6), CFrame.new(p + Vector3.new(k * 0.6, 0.8, 0)) * CFrame.Angles(0, 0, math.rad(rng:NextNumber(-25, 25))),
+					Color3.fromRGB(240, 220, 90), Enum.Material.Glass)
+			end
+		end
+	end
+
+	-- the landed ship (USS KEPLER) --------------------------------------------------------------------
+	local S = M + Vector3.new(0, 0, 82)
+	local hullW = Color3.fromRGB(205, 208, 212)
+	local hullD = Color3.fromRGB(70, 74, 82)
+	part(folder, Vector3.new(44, 12, 22), CFrame.new(S + Vector3.new(0, 11, 0)), hullW, Enum.Material.Metal)
+	part(folder, Vector3.new(44, 4, 16), CFrame.new(S + Vector3.new(0, 19, 0)), hullW, Enum.Material.Metal)
+	local nose = Instance.new("WedgePart")
+	nose.Anchored = true
+	nose.Size = Vector3.new(22, 12, 14)
+	nose.CFrame = CFrame.new(S + Vector3.new(29, 11, 0)) * CFrame.Angles(0, math.rad(-90), 0)
+	nose.Color = hullW
+	nose.Material = Enum.Material.Metal
+	nose.Parent = folder
+	deco(folder, Vector3.new(6, 2.5, 14), CFrame.new(S + Vector3.new(24, 15, 0)), Color3.fromRGB(120, 200, 255), Enum.Material.Neon).Transparency = 0.35
+	for _, z in { -6, 6 } do
+		local eng = part(folder, Vector3.new(10, 8, 8), CFrame.new(S + Vector3.new(-26, 11, z)) * CFrame.Angles(0, 0, 0), hullD, Enum.Material.Metal, Enum.PartType.Cylinder)
+		eng.Size = Vector3.new(10, 8, 8)
+		local glow = deco(folder, Vector3.new(0.5, 6.5, 6.5), CFrame.new(S + Vector3.new(-31.3, 11, z)), Color3.fromRGB(90, 200, 255), Enum.Material.Neon, Enum.PartType.Cylinder)
+		local gl = Instance.new("PointLight")
+		gl.Color = Color3.fromRGB(90, 200, 255)
+		gl.Range = 20
+		gl.Parent = glow
+	end
+	for _, x in { -16, 16 } do
+		for _, z in { -12, 12 } do
+			part(folder, Vector3.new(1.4, 6, 1.4), CFrame.new(S + Vector3.new(x, 3, z)) * CFrame.Angles(math.rad(z > 0 and 15 or -15), 0, 0), hullD, Enum.Material.Metal)
+			part(folder, Vector3.new(4, 0.6, 4), CFrame.new(S + Vector3.new(x, 0.3, z + (z > 0 and 0.8 or -0.8))), hullD, Enum.Material.Metal)
+		end
+	end
+	-- ramp down toward the defense area
+	local ramp = part(folder, Vector3.new(10, 0.8, 16), CFrame.new(S + Vector3.new(0, 2.6, -17)) * CFrame.Angles(math.rad(-18), 0, 0), hullD, Enum.Material.DiamondPlate)
+	ramp.Name = "Ramp"
+	deco(folder, Vector3.new(0.3, 30, 0.3), CFrame.new(S + Vector3.new(-12, 36, 4)), hullD, Enum.Material.Metal)
+	local beacon = deco(folder, Vector3.new(0.8, 0.8, 0.8), CFrame.new(S + Vector3.new(-12, 51.4, 4)), Color3.fromRGB(255, 40, 30), Enum.Material.Neon, Enum.PartType.Ball)
+	local bl = Instance.new("PointLight")
+	bl.Color = Color3.fromRGB(255, 40, 30)
+	bl.Range = 25
+	bl.Parent = beacon
+	-- hull lettering
+	local plate = deco(folder, Vector3.new(16, 3, 0.1), CFrame.new(S + Vector3.new(-6, 13, -11.06)) * CFrame.Angles(0, math.rad(180), 0), hullW)
+	plate.Transparency = 1
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Back
+	sg.CanvasSize = Vector2.new(480, 90)
+	sg.Parent = plate
+	local txt = Instance.new("TextLabel")
+	txt.Size = UDim2.fromScale(1, 1)
+	txt.BackgroundTransparency = 1
+	txt.Font = Enum.Font.GothamBlack
+	txt.TextScaled = true
+	txt.TextColor3 = Color3.fromRGB(40, 42, 48)
+	txt.Text = "USS KEPLER  ·  K-2011"
+	txt.Parent = sg
+
+	-- field generator: what the Keis attack here ---------------------------------------------------------
+	local G = M + Vector3.new(0, 0, 32)
+	local gbase = part(folder, Vector3.new(3, 14, 14), CFrame.new(G + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, 0, math.rad(90)), hullD, Enum.Material.Metal, Enum.PartType.Cylinder)
+	gbase.Name = "GeneratorBase"
+	local core = part(folder, Vector3.new(12, 6, 6), CFrame.new(G + Vector3.new(0, 9, 0)) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(90, 220, 255), Enum.Material.Neon, Enum.PartType.Cylinder)
+	core.Name = "ReactorCore"
+	local cl = Instance.new("PointLight")
+	cl.Color = core.Color
+	cl.Range = 45
+	cl.Brightness = 3
+	cl.Shadows = true
+	cl.Parent = core
+	for k, y in { 5, 9, 13 } do
+		local ring = deco(folder, Vector3.new(0.8, 10 + k, 10 + k), CFrame.new(G + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)), hullW, Enum.Material.Metal, Enum.PartType.Cylinder)
+		ring.Name = "ReactorRing"
+	end
+	part(folder, Vector3.new(1, 10, 10), CFrame.new(G + Vector3.new(0, 15.5, 0)) * CFrame.Angles(0, 0, math.rad(90)), hullD, Enum.Material.Metal, Enum.PartType.Cylinder)
+
+	-- floodlights around the defense area
+	for k = 0, 5 do
+		local a = k / 6 * math.pi * 2
+		local p = G + Vector3.new(math.cos(a) * 34, 0, math.sin(a) * 34)
+		part(folder, Vector3.new(0.8, 10, 0.8), CFrame.new(p + Vector3.new(0, 5, 0)), hullD, Enum.Material.Metal)
+		local head = deco(folder, Vector3.new(2, 1.2, 1.2), CFrame.lookAt(p + Vector3.new(0, 10.5, 0), p + Vector3.new(math.cos(a) * 30, 0, math.sin(a) * 30)),
+			Color3.fromRGB(255, 245, 220), Enum.Material.Neon)
+		local spot = Instance.new("SpotLight")
+		spot.Face = Enum.NormalId.Front
+		spot.Range = 60
+		spot.Angle = 70
+		spot.Brightness = 2.5
+		spot.Shadows = true
+		spot.Color = Color3.fromRGB(255, 240, 215)
+		spot.Parent = head
+	end
+
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Anchored = true
+	spawn.Neutral = true
+	spawn.Enabled = false
+	spawn.Duration = 0
+	spawn.Size = Vector3.new(10, 0.4, 8)
+	spawn.CFrame = CFrame.new(S + Vector3.new(0, 0.2, -30))
+	spawn.Transparency = 1
+	spawn.CanCollide = false
+	spawn.Parent = folder
+
+	-- glowing fissures: where the Keis crawl out
+	local vents = {}
+	for k = 0, 9 do
+		local a = k / 10 * math.pi * 2 + rng:NextNumber(-0.15, 0.15)
+		local d = rng:NextNumber(130, 175)
+		local p = G + Vector3.new(math.cos(a) * d, 0, math.sin(a) * d)
+		T:FillBlock(CFrame.new(p + Vector3.new(0, 1, 0)) * CFrame.Angles(0, a, 0), Vector3.new(4, 6, 14), Enum.Material.Air)
+		local crack = deco(folder, Vector3.new(2, 0.3, 12), CFrame.new(p + Vector3.new(0, -1.8, 0)) * CFrame.Angles(0, a, 0), Color3.fromRGB(255, 50, 30), Enum.Material.Neon)
+		emitter(crack, { Texture = SMOKE, Rate = 3, Lifetime = NumberRange.new(3, 5), Speed = NumberRange.new(2, 4),
+			Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 2), NumberSequenceKeypoint.new(1, 8) }),
+			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 1) }),
+			Color = ColorSequence.new(Color3.fromRGB(255, 140, 100)), EmissionDirection = Enum.NormalId.Top })
+		local cl2 = Instance.new("PointLight")
+		cl2.Color = Color3.fromRGB(255, 60, 30)
+		cl2.Range = 18
+		cl2.Brightness = 1.5
+		cl2.Parent = crack
+		table.insert(vents, p + Vector3.new(0, 6, 0))
+	end
+
+	local roomCenters = {}
+	for k = 0, 7 do
+		local a = k / 8 * math.pi * 2
+		table.insert(roomCenters, G + Vector3.new(math.cos(a) * 60, 3, math.sin(a) * 60))
+	end
+
+	-- keep everyone inside the map
+	for _, w in { { Vector3.new(SIZE, 300, 2), Vector3.new(0, 150, SIZE / 2) }, { Vector3.new(SIZE, 300, 2), Vector3.new(0, 150, -SIZE / 2) },
+		{ Vector3.new(2, 300, SIZE), Vector3.new(SIZE / 2, 150, 0) }, { Vector3.new(2, 300, SIZE), Vector3.new(-SIZE / 2, 150, 0) } } do
+		local wall = part(folder, w[1], CFrame.new(M + w[2]), Color3.new(0, 0, 0))
+		wall.Transparency = 1
+		wall.CanQuery = false
+	end
+
+	-- sky: Jupiter hangs huge over the horizon
+	local jc, jr = M + Vector3.new(420, 520, -1050), 620
+	local space = {
+		SpaceArt.jupiter(folder, jc, jr, M, 1),
+		SpaceArt.stars(folder, M, 1700, 450, 9, jc, jr * 2.1),
+	}
+
+	return {
+		folder = folder,
+		spawn = spawn,
+		reactor = core,
+		reactorRadius = 8,
+		vents = vents,
+		roomCenters = roomCenters,
+		space = space,
+	}
+end
+
+return MoonBuilder
+]]></ProtectedString></Properties></Item>
+<Item class="ModuleScript" referent="RBX0000000C"><Properties><string name="Name">PlayerData</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Permanent progress: level, XP, best wave, total Keis destroyed. Saved with DataStores.
 -- In Studio, enable Game Settings → Security → "Enable Studio Access to API Services" to test saving.
 
@@ -2033,7 +2682,7 @@ end
 
 return PlayerData
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX00000009"><Properties><string name="Name">ShipBuilder</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000D"><Properties><string name="Name">ShipBuilder</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Builds the ship (USS KEPLER), the space outside it, and Jupiter. Parts only, no assets.
 --
 --   Top view (X →, Z ↓). Jupiter is off to +X/+Z, so the bridge, medbay and observation deck face it.
@@ -2043,6 +2692,8 @@ return PlayerData
 --                               [Observ.]   [Medbay]
 
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SpaceArt = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpaceArt"))
 local Lighting = game:GetService("Lighting")
 
 local ShipBuilder = {}
@@ -2128,6 +2779,238 @@ local function sectorLabel(parent: Instance, cf: CFrame, code: string)
 	l.TextTransparency = 0.15
 	l.Text = code
 	l.Parent = sg
+end
+
+-- Detail pass ----------------------------------------------------------------------------------------
+local SMOKE = "rbxasset://textures/particles/smoke_main.dds"
+local SPARK = "rbxasset://textures/particles/sparkles_main.dds"
+local doorKeys: { [string]: boolean } = {}
+
+local function emitter(parent: Instance, props: { [string]: any }): ParticleEmitter
+	local e = Instance.new("ParticleEmitter")
+	for k, v in props do
+		(e :: any)[k] = v
+	end
+	e.Parent = parent
+	return e
+end
+
+-- sliding double doors; clients animate them (Doors.client) when anyone gets close
+local function slidingDoor(parent: Instance, center: Vector3, alongX: boolean, width: number, key: string)
+	if doorKeys[key] then
+		return
+	end
+	doorKeys[key] = true
+	local along = if alongX then Vector3.xAxis else Vector3.zAxis
+	for _, sideSign in { -1, 1 } do
+		local leafCenter = center + along * sideSign * (width / 4)
+		local leafSize = if alongX then Vector3.new(width / 2, DOOR_H, 0.5) else Vector3.new(0.5, DOOR_H, width / 2)
+		local leaf = deco(parent, leafSize, CFrame.new(leafCenter), Color3.fromRGB(105, 110, 116), Enum.Material.DiamondPlate)
+		local stripeSize = if alongX then Vector3.new(width / 2, 1, 0.6) else Vector3.new(0.6, 1, width / 2)
+		local stripe = deco(parent, stripeSize, CFrame.new(leafCenter + Vector3.new(0, -DOOR_H / 2 + 2, 0)), HAZARD_Y, Enum.Material.SmoothPlastic)
+		local winSize = if alongX then Vector3.new(0.9, 3, 0.6) else Vector3.new(0.6, 3, 0.9)
+		local win = deco(parent, winSize, CFrame.new(leafCenter + Vector3.new(0, 1.5, 0) - along * sideSign * (width / 4 - 1.2)),
+			Color3.fromRGB(120, 200, 255), Enum.Material.Neon)
+		win.Transparency = 0.3
+		for _, p in { leaf, stripe, win } do
+			p:SetAttribute("ClosedCF", p.CFrame)
+			p:SetAttribute("OpenOffset", along * sideSign * (width / 2 - 0.4))
+			p:SetAttribute("DoorCenter", center)
+			CollectionService:AddTag(p, "DoorLeaf")
+		end
+	end
+end
+
+local function freeSpots(def: RoomDef, side: string, length: number, margin: number): { number }
+	local spots = {}
+	local t = -length / 2 + margin
+	while t <= length / 2 - margin do
+		local ok = true
+		for _, h in def.holes do
+			if h.side == side and math.abs(t - h.offset) < h.width / 2 + margin then
+				ok = false
+			end
+		end
+		if ok then
+			table.insert(spots, t)
+		end
+		t += 2
+	end
+	return spots
+end
+
+local SCREEN_LINES = {
+	{ "REACTOR OUTPUT", "98.2%", "CORE TEMP 3412K", "COOLANT FLOW OK" },
+	{ "NAV // JUPITER ORBIT", "ALT 71,492 KM", "VEL 42.1 KM/S", "DRIFT +0.003" },
+	{ "LIFE SUPPORT", "O2 20.9%", "CO2 0.04%", "HULL PRESSURE OK" },
+	{ "SENSOR SWEEP", "UNKNOWN SIGNAL", "SOURCE: VENTS", "PATTERN: K-E-I-S" },
+	{ "COMMS // EARTH", "SIGNAL LOST", "LAST CONTACT", "07/14/2011 23:31" },
+}
+local SIGNS = { "DANGER\nHIGH VOLTAGE", "AUTHORIZED\nPERSONNEL ONLY", "CAUTION\nLOW GRAVITY AREA", "WARNING\nVENT ACCESS", "SECTOR\nSEALED" }
+
+local function console(parent: Instance, cf: CFrame, rng: Random)
+	-- cf: at floor, facing into the room (LookVector = into the room)
+	part(parent, Vector3.new(3.4, 3, 1.4), cf * CFrame.new(0, 1.5, 0), Color3.fromRGB(70, 74, 80), Enum.Material.Metal)
+	local screen = deco(parent, Vector3.new(3, 1.8, 0.15), cf * CFrame.new(0, 3.6, 0.15) * CFrame.Angles(math.rad(25), 0, 0),
+		Color3.fromRGB(10, 18, 14), Enum.Material.SmoothPlastic)
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(300, 180)
+	sg.LightInfluence = 0
+	sg.Brightness = 1.6
+	sg.Parent = screen
+	local lines = SCREEN_LINES[rng:NextInteger(1, #SCREEN_LINES)]
+	local color = if rng:NextNumber() < 0.5 then Color3.fromRGB(90, 255, 140) else Color3.fromRGB(255, 170, 70)
+	for i, line in lines do
+		local l = Instance.new("TextLabel")
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.fromOffset(12, 8 + (i - 1) * 32)
+		l.Size = UDim2.new(1, -24, 0, 28)
+		l.Font = Enum.Font.Code
+		l.TextSize = 22
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextColor3 = color
+		l.Text = line
+		l.Parent = sg
+	end
+	CollectionService:AddTag(screen, "ConsoleScreen")
+	light(screen, color, 7, 0.5)
+	-- button strip
+	for i = -1, 1 do
+		deco(parent, Vector3.new(0.35, 0.15, 0.35), cf * CFrame.new(i * 0.8, 3.05, -0.3),
+			if i == 0 then Color3.fromRGB(255, 60, 50) else Color3.fromRGB(255, 200, 60), Enum.Material.Neon)
+	end
+end
+
+local function sign(parent: Instance, cf: CFrame, text: string)
+	local board = deco(parent, Vector3.new(4.2, 2.4, 0.1), cf, HAZARD_Y, Enum.Material.SmoothPlastic)
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(210, 120)
+	sg.LightInfluence = 1
+	sg.Parent = board
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.fromScale(1, 1)
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.GothamBlack
+	l.TextScaled = true
+	l.TextColor3 = Color3.fromRGB(20, 20, 20)
+	l.Text = text
+	l.Parent = sg
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 10)
+	pad.PaddingRight = UDim.new(0, 10)
+	pad.PaddingTop = UDim.new(0, 8)
+	pad.PaddingBottom = UDim.new(0, 8)
+	pad.Parent = l
+end
+
+local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
+	local c, sx, sz = def.center, def.size.X, def.size.Y
+	local alongX = sx >= sz
+	local long, short = math.max(sx, sz), math.min(sx, sz)
+
+	-- ceiling arches across the short axis, with corner braces
+	local t = -long / 2 + 4
+	while t < long / 2 - 2 do
+		local pos = if alongX then c + Vector3.new(t, H - 0.6, 0) else c + Vector3.new(0, H - 0.6, t)
+		local beam = if alongX then Vector3.new(1.2, 1.2, short - 2) else Vector3.new(short - 2, 1.2, 1.2)
+		deco(folder, beam, CFrame.new(pos), RIB, Enum.Material.Metal)
+		for _, sgn in { -1, 1 } do
+			local off = if alongX then Vector3.new(0, -1.4, sgn * (short / 2 - 2)) else Vector3.new(sgn * (short / 2 - 2), -1.4, 0)
+			local rot = if alongX then CFrame.Angles(sgn * math.rad(45), 0, 0) else CFrame.Angles(0, 0, -sgn * math.rad(45))
+			deco(folder, Vector3.new(0.9, 3.4, 0.9), CFrame.new(pos + off) * rot, RIB, Enum.Material.Metal)
+		end
+		t += 8
+	end
+
+	-- cable bundles along the ceiling
+	for _, off in { -short / 2 + 3, short / 2 - 3.6 } do
+		for k = 0, 1 do
+			local pos = if alongX then c + Vector3.new(0, H - 1.8 - k * 0.45, off + k * 0.5) else c + Vector3.new(off + k * 0.5, H - 1.8 - k * 0.45, 0)
+			local cable = deco(folder, Vector3.new(long - 3, 0.35, 0.35), CFrame.new(pos) * (if alongX then CFrame.new() else CFrame.Angles(0, math.rad(90), 0)),
+				if k == 0 then Color3.fromRGB(25, 25, 28) else Color3.fromRGB(150, 40, 35), Enum.Material.SmoothPlastic)
+			cable.Shape = Enum.PartType.Cylinder
+		end
+	end
+
+	-- consoles and signs on walls with free space
+	local placedConsoles, placedSigns = 0, 0
+	for _, side in { "N", "S", "E", "W" } do
+		local sideAlongX = side == "N" or side == "S"
+		local length = if sideAlongX then sx else sz
+		local spots = freeSpots(def, side, length, 5)
+		if #spots > 0 then
+			local inward = if side == "N" then Vector3.new(0, 0, 1) elseif side == "S" then Vector3.new(0, 0, -1)
+				elseif side == "E" then Vector3.new(-1, 0, 0) else Vector3.new(1, 0, 0)
+			local fixed = if side == "N" then c.Z - sz / 2 elseif side == "S" then c.Z + sz / 2 elseif side == "E" then c.X + sx / 2 else c.X - sx / 2
+			local function wallPoint(tt: number, y: number, depth: number): Vector3
+				local base = if sideAlongX then Vector3.new(c.X + tt, c.Y + y, fixed) else Vector3.new(fixed, c.Y + y, c.Z + tt)
+				return base + inward * depth
+			end
+			if placedConsoles < 2 and rng:NextNumber() < 0.75 then
+				local tt = spots[rng:NextInteger(1, #spots)]
+				local p = wallPoint(tt, 0, 2)
+				console(folder, CFrame.lookAt(p, p + inward), rng)
+				placedConsoles += 1
+			end
+			if placedSigns < 1 and rng:NextNumber() < 0.6 then
+				local tt = spots[rng:NextInteger(1, #spots)]
+				local p = wallPoint(tt, 7.5, 1.3)
+				sign(folder, CFrame.lookAt(p, p + inward), SIGNS[rng:NextInteger(1, #SIGNS)])
+				placedSigns += 1
+			end
+		end
+	end
+
+	-- steam leaking from the pipes
+	for _ = 1, 2 do
+		local side = if rng:NextNumber() < 0.5 then 1 else -1
+		local tt = rng:NextNumber(-long / 2 + 4, long / 2 - 4)
+		local pos = if alongX then c + Vector3.new(tt, H - 1, side * (short / 2 - 1.6)) else c + Vector3.new(side * (short / 2 - 1.6), H - 1, tt)
+		local holder = deco(folder, Vector3.new(0.6, 0.6, 0.6), CFrame.new(pos), PIPE, Enum.Material.Metal)
+		emitter(holder, {
+			Texture = SMOKE, Rate = 4, Lifetime = NumberRange.new(2, 3.5), Speed = NumberRange.new(2, 4),
+			SpreadAngle = Vector2.new(25, 25), EmissionDirection = Enum.NormalId.Bottom, RotSpeed = NumberRange.new(-30, 30),
+			Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.8), NumberSequenceKeypoint.new(1, 5) }),
+			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 1) }),
+			Color = ColorSequence.new(Color3.fromRGB(220, 225, 230)), LightInfluence = 0.8,
+		})
+	end
+
+	-- a broken, sparking wall panel in some rooms
+	if rng:NextNumber() < 0.45 then
+		local side = if rng:NextNumber() < 0.5 then 1 else -1
+		local tt = rng:NextNumber(-long / 2 + 5, long / 2 - 5)
+		local pos = if alongX then c + Vector3.new(tt, 9, side * (short / 2 - 1.1)) else c + Vector3.new(side * (short / 2 - 1.1), 9, tt)
+		local box = deco(folder, Vector3.new(1.6, 1.6, 1.6), CFrame.new(pos), Color3.fromRGB(40, 40, 44), Enum.Material.CorrodedMetal)
+		emitter(box, {
+			Texture = SPARK, Rate = 6, Lifetime = NumberRange.new(0.3, 0.7), Speed = NumberRange.new(8, 14),
+			SpreadAngle = Vector2.new(60, 60), Acceleration = Vector3.new(0, -40, 0), LightEmission = 1,
+			Size = NumberSequence.new(0.25, 0), Color = ColorSequence.new(Color3.fromRGB(255, 200, 90)),
+		})
+		local l = light(box, Color3.fromRGB(255, 170, 80), 12, 1.2)
+		task.spawn(function()
+			while box.Parent do
+				l.Enabled = math.random() < 0.5
+				task.wait(math.random() * 0.25)
+			end
+		end)
+	end
+
+	-- lockers in quarters and medbay
+	if def.name == "Crew Quarters" or def.name == "Medbay" then
+		-- quarters: against the south wall; medbay: against the north wall (both away from windows)
+		local facing = if def.name == "Medbay" then 1 else -1
+		local wallZ = if facing == 1 then c.Z - sz / 2 + 1.6 else c.Z + sz / 2 - 1.6
+		for i = 0, 3 do
+			local x = c.X + sx / 2 - 2.5 - i * 2.3
+			part(folder, Vector3.new(2.2, 7, 1.8), CFrame.new(x, 3.5, wallZ), Color3.fromRGB(85, 95, 110), Enum.Material.Metal)
+			for k = 0, 2 do
+				deco(folder, Vector3.new(1.2, 0.12, 0.1), CFrame.new(x, 5.6 + k * 0.4, wallZ + facing * 0.92), Color3.fromRGB(30, 30, 35), Enum.Material.Metal)
+			end
+		end
+	end
 end
 
 local function buildRoom(parent: Instance, def: RoomDef): Folder
@@ -2225,6 +3108,10 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 				end
 				local header = if alongX then Vector3.new(h.b - h.a + 1.8, 0.8, 1.4) else Vector3.new(1.4, 0.8, h.b - h.a + 1.8)
 				deco(folder, header, CFrame.new(at((h.a + h.b) / 2, h.top + 0.4, 0.7)), RIB, Enum.Material.Metal)
+				local boundary = if side == "N" then c.Z - sz / 2 elseif side == "S" then c.Z + sz / 2 elseif side == "E" then c.X + sx / 2 else c.X - sx / 2
+				local doorCenter = at((h.a + h.b) / 2, DOOR_H / 2, 0)
+				local along = if alongX then doorCenter.X else doorCenter.Z
+				slidingDoor(folder, doorCenter, alongX, h.b - h.a, string.format("%s|%.1f|%.1f", if alongX then "x" else "z", boundary, along))
 				local lamp = if alongX then Vector3.new(2, 0.3, 0.2) else Vector3.new(0.2, 0.3, 2)
 				local l = deco(folder, lamp, CFrame.new(at((h.a + h.b) / 2, h.top + 0.4, 1.45)), Color3.fromRGB(255, 70, 50), Enum.Material.Neon)
 				light(l, Color3.fromRGB(255, 80, 60), 8, 0.6)
@@ -2289,7 +3176,7 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 			local pz = c.Z - sz / 2 + (j - 0.5) * sz / stepZ
 			deco(folder, Vector3.new(7, 0.5, 1.4), CFrame.new(px, c.Y + H - 0.25, pz), HULL_DARK, Enum.Material.Metal)
 			local tube = deco(folder, Vector3.new(6, 0.25, 0.5), CFrame.new(px, c.Y + H - 0.55, pz), Color3.fromRGB(215, 235, 255), Enum.Material.Neon)
-			light(tube, Color3.fromRGB(200, 222, 255), 24, 0.95, "ShipLight")
+			light(tube, Color3.fromRGB(200, 222, 255), 26, 1.1, "ShipLight").Shadows = true
 		end
 	end
 
@@ -2301,53 +3188,6 @@ local function buildRoom(parent: Instance, def: RoomDef): Folder
 	return folder
 end
 
--- Jupiter, built from stacked discs so it has real color bands ----------------------------------
-local BANDS = {
-	Color3.fromRGB(238, 222, 196), Color3.fromRGB(214, 170, 120), Color3.fromRGB(180, 120, 80),
-	Color3.fromRGB(232, 196, 150), Color3.fromRGB(200, 140, 95), Color3.fromRGB(245, 232, 210),
-	Color3.fromRGB(165, 105, 72), Color3.fromRGB(226, 182, 132),
-}
-
-local function buildJupiter(parent: Instance, center: Vector3, R: number, shipPos: Vector3)
-	local folder = Instance.new("Model")
-	folder.Name = "Jupiter"
-	folder.ModelStreamingMode = Enum.ModelStreamingMode.Persistent -- always visible, even with streaming on
-	folder.Parent = parent
-	local slices = 44
-	local t = 2 * R / slices
-	local rng = Random.new(2011)
-	local band = 1
-	for i = 0, slices - 1 do
-		local y = -R + (i + 0.5) * t
-		local r = math.sqrt(math.max(R * R - y * y, 1))
-		if rng:NextNumber() < 0.45 then
-			band = rng:NextInteger(1, #BANDS)
-		end
-		local disc = deco(folder, Vector3.new(t + 0.2, 2 * r, 2 * r), CFrame.new(center + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)), BANDS[band])
-		disc.Shape = Enum.PartType.Cylinder
-		disc.Material = Enum.Material.SmoothPlastic
-	end
-	-- the Great Red Spot, facing the ship, south of the equator
-	local toShip = shipPos - center
-	local flat = Vector3.new(toShip.X, 0, toShip.Z).Unit
-	local lat = math.rad(-22)
-	local dir = (flat * math.cos(lat) + Vector3.new(0, math.sin(lat), 0)).Unit
-	local spotPos = center + dir * (R * 0.985)
-	local spot = deco(folder, Vector3.new(R * 0.03, R * 0.26, R * 0.26), CFrame.lookAt(spotPos, spotPos + dir) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(190, 75, 50))
-	spot.Shape = Enum.PartType.Cylinder
-	-- soft glow shell
-	local glow = deco(folder, Vector3.new(R * 2.08, R * 2.08, R * 2.08), CFrame.new(center), Color3.fromRGB(255, 170, 110), Enum.Material.Neon)
-	glow.Shape = Enum.PartType.Ball
-	glow.Transparency = 0.93
-
-	-- moons
-	for _, m in { { offset = Vector3.new(-R * 1.6, R * 0.35, -R * 0.6), size = R * 0.09, color = Color3.fromRGB(235, 210, 120) },
-		{ offset = Vector3.new(-R * 0.7, -R * 0.55, -R * 1.5), size = R * 0.07, color = Color3.fromRGB(225, 225, 235) } } do
-		local moon = deco(folder, Vector3.one * m.size, CFrame.new(center + m.offset), m.color)
-		moon.Shape = Enum.PartType.Ball
-	end
-end
-
 export type ShipInfo = {
 	folder: Folder,
 	spawn: SpawnLocation,
@@ -2356,6 +3196,7 @@ export type ShipInfo = {
 	vents: { Vector3 },
 	roomCenters: { Vector3 },
 	leaderboard: Frame,
+	space: { Instance },
 }
 
 function ShipBuilder.build(): ShipInfo
@@ -2422,8 +3263,10 @@ function ShipBuilder.build(): ShipInfo
 
 	local roomCenters = {}
 	local folders: { [string]: Folder } = {}
+	local detailRng = Random.new(2011)
 	for _, def in rooms do
 		folders[def.name] = buildRoom(ship, def)
+		detailRoom(folders[def.name], def, detailRng)
 		table.insert(roomCenters, def.center)
 	end
 
@@ -2519,7 +3362,11 @@ function ShipBuilder.build(): ShipInfo
 	end
 
 	-- Space -------------------------------------------------------------------------------------
-	buildJupiter(ship, Vector3.new(1000, 110, 720), 460, Vector3.new(40, 8, 0))
+	local jupiterCenter, jupiterRadius = Vector3.new(1000, 110, 720), 460
+	local space = {
+		SpaceArt.jupiter(ship, jupiterCenter, jupiterRadius, Vector3.new(40, 8, 0), 1),
+		SpaceArt.stars(ship, Vector3.new(0, 0, 0), 1700, 450, 7, jupiterCenter, jupiterRadius * 2.1),
+	}
 
 	for _, child in Lighting:GetChildren() do
 		if child:IsA("Sky") or child:IsA("Atmosphere") or child:IsA("Clouds") then
@@ -2533,7 +3380,8 @@ function ShipBuilder.build(): ShipInfo
 	Lighting.ClockTime = 0
 	Lighting.Brightness = 1
 	Lighting.Ambient = Color3.fromRGB(30, 32, 36)
-	Lighting.OutdoorAmbient = Color3.fromRGB(170, 160, 150)
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 140, 130)
+	Lighting.ExposureCompensation = 0.15
 	Lighting.EnvironmentDiffuseScale = 0.3
 	Lighting.EnvironmentSpecularScale = 0.5
 	Lighting.FogEnd = 100000
@@ -2547,12 +3395,13 @@ function ShipBuilder.build(): ShipInfo
 		vents = vents,
 		roomCenters = roomCenters,
 		leaderboard = boardFrame,
+		space = space,
 	}
 end
 
 return ShipBuilder
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX0000000A"><Properties><string name="Name">Suit</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000E"><Properties><string name="Name">Suit</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Dresses every crew member in a white spacesuit: suit colors, glass helmet, life-support pack, mission patch.
 -- Turn off with Config.SPACESUITS = false.
 
@@ -2637,7 +3486,7 @@ return Suit
 ]]></ProtectedString></Properties></Item>
 </Item>
 </Item>
-<Item class="StarterPlayer" referent="RBX00000015"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX00000014"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX00000013"><Properties><string name="Name">Client</string></Properties><Item class="LocalScript" referent="RBX0000000D"><Properties><string name="Name">Atmosphere</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="StarterPlayer" referent="RBX0000001C"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX0000001B"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX0000001A"><Properties><string name="Name">Client</string></Properties><Item class="LocalScript" referent="RBX00000011"><Properties><string name="Name">Atmosphere</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Semi-horror mood: light 2011 camcorder overlay, color grade, alarm pulse, power-outage dark, static when a Keis is close.
 
 local Lighting = game:GetService("Lighting")
@@ -2704,7 +3553,9 @@ task.spawn(function()
 	while true do
 		local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		local ship = workspace:FindFirstChild("Ship")
-		if hrp and ship then
+		if ReplicatedStorage:GetAttribute("Stage") == "Moon" then
+			currentCam = "CAM EXT-1 (IO SURFACE)"
+		elseif hrp and ship then
 			for _, room in ship:GetChildren() do
 				local center = room:GetAttribute("Center") :: Vector3?
 				local size = room:GetAttribute("Size") :: Vector2?
@@ -2796,7 +3647,7 @@ RunService.RenderStepped:Connect(function(dt)
 	cc.TintColor = if powerOut then Color3.fromRGB(200, 215, 255) else Color3.fromRGB(236, 246 - math.floor(danger * 60), 240 - math.floor(danger * 80))
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX0000000E"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX00000012"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Shooting feel: hold-to-fire, crosshair, tracers, hitmarkers, floating damage numbers, kill pops, combo counter, ammo.
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -2906,9 +3757,33 @@ local function tracer(from: Vector3, to: Vector3, color: Color3)
 	Debris:AddItem(spark, 0.2)
 end
 
+-- where the shot goes: through the screen center in shoulder mode, else the mouse
+local function aimPoint(): Vector3
+	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+		local vp = camera.ViewportSize
+		local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { player.Character :: Instance, tracerFolder }
+		local hit = workspace:Raycast(ray.Origin, ray.Direction * 400, params)
+		return if hit then hit.Position else ray.Origin + ray.Direction * 400
+	end
+	return mouse.Hit.Position
+end
+
+local function muzzleFlash(at: Vector3, color: Color3)
+	local f = make("Part", {
+		Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false, Shape = Enum.PartType.Ball,
+		Material = Enum.Material.Neon, Color = color, Size = Vector3.one * 0.9, CFrame = CFrame.new(at), Parent = tracerFolder,
+	})
+	make("PointLight", { Color = color, Range = 14, Brightness = 4, Parent = f })
+	Theme.tween(f, 0.06, { Size = Vector3.one * 0.2, Transparency = 1 })
+	Debris:AddItem(f, 0.07)
+end
+
 local function tryFire()
 	local tool = equippedBlaster()
-	if not tool or player:GetAttribute("Reloading") or player:GetAttribute("CrewStatus") ~= "alive" then
+	if not tool or player:GetAttribute("Reloading") or player:GetAttribute("CrewStatus") ~= "alive" or player:GetAttribute("Sprinting") then
 		return
 	end
 	local interval = player:GetAttribute("FireInterval") or Config.Weapon.FireInterval
@@ -2921,16 +3796,19 @@ local function tryFire()
 		Reload:FireServer()
 		return
 	end
-	local aim = mouse.Hit.Position
+	local aim = aimPoint()
 	Shoot:FireServer(aim)
-	-- local tracer for instant feedback
+	-- local tracer + muzzle flash for instant feedback
 	local from = muzzlePos()
 	if from then
 		tracer(from, aim, tracerColor(player))
+		muzzleFlash(from, tracerColor(player))
 	end
-	Theme.playSound(Config.Sounds.Shoot, 0.35, 0.95 + math.random() * 0.1)
-	-- tiny recoil
-	camera.CFrame *= CFrame.Angles(math.rad(0.35), 0, 0)
+	local minigun = player:GetAttribute("Weapon") == "Minigun"
+	Theme.playSound(Config.Sounds.Shoot, if minigun then 0.25 else 0.35, (if minigun then 1.15 else 0.95) + math.random() * 0.1)
+	-- recoil (small, constant buzz for the minigun; a kick for the blaster)
+	local kick = if minigun then 0.18 else 0.55
+	camera.CFrame *= CFrame.Angles(math.rad(kick), math.rad((math.random() - 0.5) * kick * 0.6), 0)
 end
 
 local function hookTool(tool: Tool)
@@ -3070,7 +3948,7 @@ Remotes:WaitForChild("HitConfirm").OnClientEvent:Connect(function(pos: Vector3, 
 	end
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX0000000F"><Properties><string name="Name">HUD</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX00000013"><Properties><string name="Name">HUD</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Main HUD: wave + reactor, crew roster (meme format), player card, banners, narrator, toasts, downed + game over screens.
 
 local Players = game:GetService("Players")
@@ -3482,7 +4360,7 @@ Remotes:WaitForChild("GameOver").OnClientEvent:Connect(function(summary: any)
 	over.Visible = false
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX00000010"><Properties><string name="Name">KeisAnimator</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX00000014"><Properties><string name="Name">KeisAnimator</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Animates the Keis' spider legs on each client (tripod gait), so the server only moves the body.
 
 local RunService = game:GetService("RunService")
@@ -3553,7 +4431,546 @@ RunService.RenderStepped:Connect(function(dt)
 	end
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX00000011"><Properties><string name="Name">Shop</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX00000015"><Properties><string name="Name">Menu</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Start menu: a live 3D scene (Keis standing on rock, Jupiter behind them), title, PLAY.
+-- Also plays full-screen transitions (e.g. the landing on Io).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local SoundService = game:GetService("SoundService")
+
+local Theme = require(script.Parent:WaitForChild("Theme"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local KeisModel = require(Shared:WaitForChild("KeisModel"))
+local SpaceArt = require(Shared:WaitForChild("SpaceArt"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local C, F = Theme.Colors, Theme.Fonts
+local make, text = Theme.make, Theme.text
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- Fader (also used for in-game transitions) ---------------------------------------------------
+local fadeGui = make("ScreenGui", { Name = "Fader", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 100,
+	Parent = player:WaitForChild("PlayerGui") })
+local fader = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
+	BorderSizePixel = 0, Parent = fadeGui })
+local fadeText = text({ Font = F.Title, TextSize = 30, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(900, 40), TextTransparency = 1, Parent = fadeGui })
+
+local function fadeTo(alpha: number, seconds: number)
+	Theme.tween(fader, seconds, { BackgroundTransparency = 1 - alpha })
+	task.wait(seconds)
+end
+
+Remotes:WaitForChild("Transition").OnClientEvent:Connect(function(msg: string, seconds: number)
+	fadeTo(1, 1)
+	fadeText.Text = msg
+	Theme.tween(fadeText, 0.5, { TextTransparency = 0 })
+	task.wait(math.max(seconds - 1.5, 0.5))
+	Theme.tween(fadeText, 0.5, { TextTransparency = 1 })
+	fadeTo(0, 1.2)
+end)
+
+-- The scene ---------------------------------------------------------------------------------------
+local P = Vector3.new(0, 400, 7000) -- far away from the ship and Io
+local scene = Instance.new("Folder")
+scene.Name = "MenuScene"
+scene.Parent = workspace
+
+local function rock(size: Vector3, cf: CFrame, color: Color3)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = Enum.Material.Basalt
+	p.Parent = scene
+end
+
+local rng = Random.new(77)
+rock(Vector3.new(140, 6, 70), CFrame.new(P + Vector3.new(0, -3, 6)), Color3.fromRGB(58, 48, 40))
+for _ = 1, 26 do
+	local s = rng:NextNumber(3, 12)
+	rock(Vector3.new(s, s * rng:NextNumber(0.4, 0.9), s * rng:NextNumber(0.7, 1.3)),
+		CFrame.new(P + Vector3.new(rng:NextNumber(-60, 60), rng:NextNumber(-1, 1), rng:NextNumber(-8, 38)))
+			* CFrame.Angles(rng:NextNumber(0, 0.6), rng:NextNumber(0, 6), rng:NextNumber(0, 0.6)),
+		Color3.fromRGB(rng:NextInteger(60, 100), rng:NextInteger(48, 70), rng:NextInteger(36, 50)))
+end
+-- glowing fissure behind the Keis
+local crack = Instance.new("Part")
+crack.Anchored = true
+crack.CanCollide = false
+crack.Size = Vector3.new(60, 0.3, 2)
+crack.CFrame = CFrame.new(P + Vector3.new(0, 0.1, 10)) * CFrame.Angles(0, math.rad(4), 0)
+crack.Material = Enum.Material.Neon
+crack.Color = Color3.fromRGB(255, 60, 30)
+crack.Parent = scene
+local fl = Instance.new("PointLight")
+fl.Color = Color3.fromRGB(255, 70, 40)
+fl.Range = 40
+fl.Brightness = 3
+fl.Parent = crack
+
+-- key light on the Keis' faces (from the camera side) + red rim lights from below
+local key = Instance.new("Part")
+key.Anchored = true
+key.CanCollide = false
+key.Transparency = 1
+key.CFrame = CFrame.lookAt(P + Vector3.new(-12, 18, -30), P + Vector3.new(0, 6, 0))
+key.Parent = scene
+local spot = Instance.new("SpotLight")
+spot.Face = Enum.NormalId.Front
+spot.Range = 60
+spot.Angle = 70
+spot.Brightness = 2.2
+spot.Color = Color3.fromRGB(200, 220, 255)
+spot.Shadows = true
+spot.Parent = key
+
+-- the Keis lineup (boss in the middle)
+local lineup = {
+	{ "Master", Vector3.new(0, 0, 4) },
+	{ "Basic", Vector3.new(-10, 0, 0) },
+	{ "Basic", Vector3.new(10, 0, -1) },
+	{ "Skeleton", Vector3.new(-19, 0, 5) },
+	{ "Iron", Vector3.new(20, 0, 6) },
+	{ "Keyring", Vector3.new(-30, 0, 12) },
+}
+local menuKeis = {}
+for _, entry in lineup do
+	local def = (Config.KeisTypes :: any)[entry[1]]
+	local model, _, root, _, _, chant = KeisModel.build(def, P + entry[2])
+	root.Anchored = true
+	root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(rng:NextNumber(-12, 12)), 0)
+	model.Parent = scene
+	local motors = {}
+	for _, m in root:GetChildren() do
+		if m:IsA("Motor6D") then
+			table.insert(motors, m)
+		end
+	end
+	table.insert(menuKeis, { chant = chant, motors = motors, phase = rng:NextNumber(0, 6) })
+end
+
+-- Jupiter rising behind them + stars
+local jc, jr = P + Vector3.new(-160, 210, 1000), 480
+SpaceArt.jupiter(scene, jc, jr, P + Vector3.new(0, 6, -40), 1)
+SpaceArt.stars(scene, P, 1600, 450, 3, jc, jr * 2.1)
+
+-- UI ---------------------------------------------------------------------------------------------
+local gui = make("ScreenGui", { Name = "Menu", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 50,
+	Parent = player:WaitForChild("PlayerGui") })
+local uiScale = make("UIScale", { Parent = gui })
+make("Frame", { Size = UDim2.fromScale(0.55, 1), BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0, Parent = gui }, {
+	make("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.15), NumberSequenceKeypoint.new(1, 1) }) }),
+})
+local column = make("Frame", { Position = UDim2.new(0, 70, 0.5, -230), Size = UDim2.fromOffset(520, 520), BackgroundTransparency = 1, Parent = gui })
+text({ Font = F.Mono, TextSize = 16, TextColor3 = C.Muted, Size = UDim2.new(1, 0, 0, 20), Text = "RECOVERED FOOTAGE · USS KEPLER · 07/14/2011", Parent = column })
+local title = text({ Font = F.Title, TextSize = 92, Position = UDim2.fromOffset(-4, 22), Size = UDim2.new(1, 0, 0, 100), Text = "JUPITER",
+	TextStrokeTransparency = 0.6, Parent = column })
+text({ Font = F.Title, TextSize = 34, TextColor3 = C.Danger, Position = UDim2.fromOffset(0, 120), Size = UDim2.new(1, 0, 0, 40),
+	Text = "2011 INCIDENT", Parent = column })
+local chantLine = text({ Font = F.Mono, TextSize = 16, TextColor3 = C.Danger, Position = UDim2.fromOffset(0, 168), Size = UDim2.new(1, 0, 0, 20),
+	Text = "keis keis keis o algo o algo", TextTransparency = 0.4, Parent = column })
+
+local function button(label: string, y: number, primary: boolean): TextButton
+	local b = make("TextButton", {
+		Position = UDim2.fromOffset(0, y), Size = UDim2.fromOffset(primary and 300 or 240, primary and 64 or 46),
+		BackgroundColor3 = if primary then C.Accent else C.Panel, BackgroundTransparency = if primary then 0 else 0.2,
+		Text = label, Font = F.Title, TextSize = primary and 24 or 15, TextColor3 = if primary then C.Bg else C.Text,
+		AutoButtonColor = true, Parent = column,
+	}, { Theme.corner(8), Theme.stroke(C.Accent, if primary then 1 else 0.5, 1.5) })
+	b.MouseEnter:Connect(function()
+		Theme.tween(b, 0.15, { Position = UDim2.fromOffset(10, y) })
+	end)
+	b.MouseLeave:Connect(function()
+		Theme.tween(b, 0.15, { Position = UDim2.fromOffset(0, y) })
+	end)
+	return b
+end
+local playBtn = button("PLAY", 222, true)
+local howBtn = button("HOW TO PLAY", 302, false)
+
+-- saved stats card
+local stats = Theme.panel({ Position = UDim2.fromOffset(0, 370), Size = UDim2.fromOffset(300, 92), Parent = column })
+local statLevel = text({ Font = F.Title, TextSize = 18, TextColor3 = C.Accent, Position = UDim2.fromOffset(16, 12), Size = UDim2.new(1, -32, 0, 22), Parent = stats })
+local statBest = text({ Font = F.Body, TextSize = 15, Position = UDim2.fromOffset(16, 40), Size = UDim2.new(1, -32, 0, 18), Parent = stats })
+local statXp = Theme.bar({ Position = UDim2.fromOffset(16, 66), Size = UDim2.new(1, -32, 0, 10), Parent = stats }, C.Accent)
+local function refreshStats()
+	statLevel.Text = `LV {player:GetAttribute("Level") or 1} · {player:GetAttribute("Title") or "CADET"}`
+	statBest.Text = `BEST WAVE  {player:GetAttribute("BestWave") or 0}`
+	statXp:set((player:GetAttribute("XP") or 0) / math.max(player:GetAttribute("XPNeeded") or 100, 1))
+end
+player.AttributeChanged:Connect(refreshStats)
+refreshStats()
+
+local how = Theme.panel({ AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -60, 0.5, 0), Size = UDim2.fromOffset(420, 330), Visible = false, Parent = gui })
+text({ Font = F.Title, TextSize = 18, Position = UDim2.fromOffset(20, 16), Size = UDim2.new(1, -40, 0, 24), Text = "HOW TO PLAY", Parent = how })
+text({ Font = F.Body, TextSize = 15, Position = UDim2.fromOffset(20, 50), Size = UDim2.new(1, -40, 1, -60), TextWrapped = true,
+	TextYAlignment = Enum.TextYAlignment.Top, TextColor3 = C.Cream, Parent = how,
+	Text = "The Keis crawl out of the vents in waves. Keep them away from the reactor and keep your crew alive.\n\n"
+		.. "• Hold click to fire · Shift to sprint · R to reload\n"
+		.. "• Shoot a Keis in the mouth for a CRIT\n"
+		.. "• Spend credits between waves: Q opens the Upgrade Terminal\n"
+		.. "• Hold E on a downed crewmate to revive them\n"
+		.. "• Survive wave 10 and the ship lands on Io, Jupiter's volcanic moon. Low gravity." })
+howBtn.MouseButton1Click:Connect(function()
+	how.Visible = not how.Visible
+end)
+
+-- Menu lifecycle ----------------------------------------------------------------------------------
+local menuOpen = true
+local HIDE = { "HUD", "Combat", "Shop", "Atmosphere" }
+local function setGameGuis(enabled: boolean)
+	for _, name in HIDE do
+		local g = player.PlayerGui:FindFirstChild(name)
+		if g and g:IsA("ScreenGui") then
+			g.Enabled = enabled
+		end
+	end
+end
+pcall(function()
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false) -- we draw our own health bar
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+end)
+
+local chantSound: Sound? = nil
+if Config.Sounds.KeisChant ~= "" then
+	chantSound = make("Sound", { SoundId = Config.Sounds.KeisChant, Volume = 0.6, PlaybackSpeed = 0.9, Parent = SoundService })
+end
+
+local start = os.clock()
+local nextChant = os.clock() + 2
+RunService:BindToRenderStep("JupiterMenu", Enum.RenderPriority.Camera.Value + 5, function()
+	if not menuOpen then
+		return
+	end
+	setGameGuis(false)
+	uiScale.Scale = math.clamp(camera.ViewportSize.Y / 900, 0.6, 1.2)
+	local t = os.clock() - start
+	camera.CameraType = Enum.CameraType.Scriptable
+	local eye = P + Vector3.new(math.sin(t * 0.08) * 7, 6.5 + math.sin(t * 0.13) * 0.8, -40 + math.sin(t * 0.05) * 3)
+	camera.CFrame = CFrame.lookAt(eye, P + Vector3.new(-4, 9, 30))
+	camera.FieldOfView = 60
+	for _, k in menuKeis do
+		k.phase += 0.016
+		for i, m in k.motors do
+			m.Transform = CFrame.Angles(0, math.sin(k.phase * 2 + i) * 0.06, math.sin(k.phase * 3 + i * 2) * 0.05)
+		end
+	end
+	title.TextTransparency = if math.random() < 0.015 then 0.5 else 0
+	chantLine.TextTransparency = 0.3 + math.abs(math.sin(t * 1.5)) * 0.5
+	if os.clock() >= nextChant then
+		nextChant = os.clock() + 7
+		for _, k in menuKeis do
+			k.chant.Text = if math.random() < 0.6 then Config.KeisChatter[math.random(1, #Config.KeisChatter)] else ""
+		end
+		if chantSound then
+			chantSound:Play()
+		end
+	end
+end)
+
+playBtn.MouseButton1Click:Connect(function()
+	if not menuOpen then
+		return
+	end
+	playBtn.Active = false
+	fadeTo(1, 0.6)
+	menuOpen = false
+	RunService:UnbindFromRenderStep("JupiterMenu")
+	gui:Destroy()
+	scene:Destroy()
+	if chantSound then
+		chantSound:Destroy()
+	end
+	Remotes:WaitForChild("PlayRequest"):FireServer()
+	local character = player.Character or player.CharacterAdded:Wait()
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	camera.CameraType = Enum.CameraType.Custom
+	if humanoid then
+		camera.CameraSubject = humanoid :: Humanoid
+	end
+	camera.FieldOfView = 70
+	setGameGuis(true)
+	pcall(function()
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+	end)
+	task.wait(0.3)
+	fadeTo(0, 0.8)
+end)
+]]></ProtectedString></Properties></Item>
+<Item class="LocalScript" referent="RBX00000016"><Properties><string name="Name">Movement</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Movement feel: over-the-shoulder shooter camera, sprint, camera bob, hit shake, moon dust.
+
+local ContextActionService = game:GetService("ContextActionService")
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local SHOULDER = Vector3.new(1.9, 0.5, 0)
+local SPRINT_MULT = 1.45
+
+player.CameraMinZoomDistance = 6
+player.CameraMaxZoomDistance = 22
+
+local sprinting = false
+local sprintBase = 16
+local shoulderWas = false
+local offset = Vector3.zero
+local shake = 0
+local bobT = 0
+
+local function getHumanoid(): Humanoid?
+	local c = player.Character
+	return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function hasWeapon(): boolean
+	local c = player.Character
+	if not c then
+		return false
+	end
+	for _, t in c:GetChildren() do
+		if t:IsA("Tool") and t:GetAttribute("IsWeapon") then
+			return true
+		end
+	end
+	return false
+end
+
+local function setSprint(on: boolean)
+	local humanoid = getHumanoid()
+	if not humanoid or player:GetAttribute("Downed") then
+		on = false
+	end
+	if on == sprinting then
+		return
+	end
+	sprinting = on
+	player:SetAttribute("Sprinting", on) -- local only; Combat.client won't fire while sprinting
+	if humanoid then
+		if on then
+			sprintBase = humanoid.WalkSpeed
+			humanoid.WalkSpeed = sprintBase * SPRINT_MULT
+		else
+			humanoid.WalkSpeed = sprintBase
+		end
+	end
+end
+
+ContextActionService:BindAction("JupiterSprint", function(_, state)
+	setSprint(state == Enum.UserInputState.Begin)
+	return Enum.ContextActionResult.Pass
+end, true, Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3)
+ContextActionService:SetTitle("JupiterSprint", "RUN")
+
+player.CharacterAdded:Connect(function()
+	sprinting = false
+	player:SetAttribute("Sprinting", false)
+end)
+
+Remotes:WaitForChild("PlayerHurt").OnClientEvent:Connect(function(damage: number)
+	shake = math.clamp(0.15 + damage / 60, 0.15, 0.6)
+end)
+
+-- moon dust ---------------------------------------------------------------------------------------
+local lastDust = 0
+local wasAirborne = false
+local function puff(pos: Vector3, size: number)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Shape = Enum.PartType.Ball
+	p.Material = Enum.Material.SmoothPlastic
+	p.Color = Color3.fromRGB(210, 180, 110)
+	p.Transparency = 0.45
+	p.Size = Vector3.one * size
+	p.CFrame = CFrame.new(pos)
+	p.Parent = workspace
+	TweenService:Create(p, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = Vector3.one * size * 3, Transparency = 1, CFrame = CFrame.new(pos + Vector3.new(0, size, 0)) }):Play()
+	Debris:AddItem(p, 1.3)
+end
+
+RunService:BindToRenderStep("JupiterMovement", Enum.RenderPriority.Camera.Value + 2, function(dt)
+	local character = player.Character
+	local humanoid = getHumanoid()
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not humanoid or not root or camera.CameraType ~= Enum.CameraType.Custom then
+		return
+	end
+	local alive = humanoid.Health > 0 and not player:GetAttribute("Downed")
+	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	local shoulder = alive and hasWeapon() and not touchOnly and not sprinting
+
+	if shoulder then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		humanoid.AutoRotate = false
+		local look = camera.CFrame.LookVector
+		local flat = Vector3.new(look.X, 0, look.Z)
+		if flat.Magnitude > 0.01 then
+			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
+		end
+	elseif shoulderWas then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		humanoid.AutoRotate = true
+	end
+	shoulderWas = shoulder
+
+	-- walking bob
+	local v = root.AssemblyLinearVelocity
+	local speed = Vector3.new(v.X, 0, v.Z).Magnitude
+	local amount = math.clamp(speed / 16, 0, 1.6)
+	bobT += dt * (if sprinting then 11 else 8)
+	local bob = if humanoid.FloorMaterial ~= Enum.Material.Air
+		then Vector3.new(math.sin(bobT) * 0.07, math.abs(math.cos(bobT)) * 0.1, 0) * amount
+		else Vector3.zero
+	local target = (if shoulder then SHOULDER else Vector3.zero) + bob
+	offset = offset:Lerp(target, math.min(dt * 10, 1))
+	humanoid.CameraOffset = offset
+
+	-- sprint FOV kick
+	local fov = 70 + (if sprinting and speed > 2 then 9 else 0)
+	camera.FieldOfView += (fov - camera.FieldOfView) * math.min(dt * 6, 1)
+
+	-- hit shake
+	if shake > 0 then
+		shake = math.max(0, shake - dt)
+		local a = shake * 0.03
+		camera.CFrame *= CFrame.Angles((math.random() - 0.5) * a, (math.random() - 0.5) * a, (math.random() - 0.5) * a)
+	end
+
+	-- dust on Io: footsteps + landings
+	if ReplicatedStorage:GetAttribute("Stage") == "Moon" then
+		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+		local feet = root.Position - Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2 - 0.3, 0)
+		if grounded and wasAirborne then
+			for _ = 1, 5 do
+				puff(feet + Vector3.new(math.random(-15, 15) / 10, 0, math.random(-15, 15) / 10), 1.6)
+			end
+		elseif grounded and speed > 4 and os.clock() - lastDust > 0.28 then
+			lastDust = os.clock()
+			puff(feet, 0.9)
+		end
+		wasAirborne = not grounded
+	end
+end)
+]]></ProtectedString></Properties></Item>
+<Item class="LocalScript" referent="RBX00000017"><Properties><string name="Name">ShipFX</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Local ship effects: sliding doors open when anyone (crew or Keis) comes close; console screens flicker.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local OPEN_RANGE = 12
+local TWEEN = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+type Door = { leaves: { BasePart }, center: Vector3, open: boolean }
+local doors: { [string]: Door } = {}
+
+local function addLeaf(p: Instance)
+	if not p:IsA("BasePart") then
+		return
+	end
+	local center = p:GetAttribute("DoorCenter") :: Vector3?
+	if not center then
+		return
+	end
+	local key = string.format("%.1f|%.1f|%.1f", center.X, center.Y, center.Z)
+	local d = doors[key]
+	if not d then
+		d = { leaves = {}, center = center, open = false }
+		doors[key] = d
+	end
+	table.insert(d.leaves, p)
+end
+for _, p in CollectionService:GetTagged("DoorLeaf") do
+	addLeaf(p)
+end
+CollectionService:GetInstanceAddedSignal("DoorLeaf"):Connect(addLeaf)
+
+local function positions(): { Vector3 }
+	local list = {}
+	for _, pl in Players:GetPlayers() do
+		local hrp = pl.Character and pl.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if hrp then
+			table.insert(list, hrp.Position)
+		end
+	end
+	local keis = workspace:FindFirstChild("Keis")
+	if keis then
+		for _, m in keis:GetChildren() do
+			local root = m:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if root then
+				table.insert(list, root.Position)
+			end
+		end
+	end
+	return list
+end
+
+task.spawn(function()
+	while true do
+		local pos = positions()
+		for _, d in doors do
+			local near = false
+			for _, p in pos do
+				if (p - d.center).Magnitude < OPEN_RANGE then
+					near = true
+					break
+				end
+			end
+			if near ~= d.open then
+				d.open = near
+				for _, leaf in d.leaves do
+					if leaf.Parent then
+						local closed = leaf:GetAttribute("ClosedCF") :: CFrame
+						local offset = leaf:GetAttribute("OpenOffset") :: Vector3
+						TweenService:Create(leaf, TWEEN, { CFrame = if near then closed + offset else closed }):Play()
+					end
+				end
+			end
+		end
+		task.wait(0.1)
+	end
+end)
+
+-- console screens: occasional flicker
+task.spawn(function()
+	while true do
+		local screens = CollectionService:GetTagged("ConsoleScreen")
+		if #screens > 0 then
+			local s = screens[math.random(1, #screens)]
+			local gui = s:FindFirstChildOfClass("SurfaceGui")
+			if gui then
+				gui.Enabled = false
+				task.wait(0.06)
+				gui.Enabled = true
+			end
+		end
+		task.wait(math.random() * 0.8 + 0.2)
+	end
+end)
+]]></ProtectedString></Properties></Item>
+<Item class="LocalScript" referent="RBX00000018"><Properties><string name="Name">Shop</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Upgrade terminal: Q (or the button) opens it. Upgrades reset each run, so every run is a new build.
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -3739,7 +5156,7 @@ task.spawn(function()
 	end
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX00000012"><Properties><string name="Name">Theme</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX00000019"><Properties><string name="Name">Theme</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Shared UI style: dark glass panels, Jupiter-orange accents, sci-fi headings.
 
 local TweenService = game:GetService("TweenService")

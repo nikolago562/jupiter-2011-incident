@@ -108,9 +108,33 @@ local function tracer(from: Vector3, to: Vector3, color: Color3)
 	Debris:AddItem(spark, 0.2)
 end
 
+-- where the shot goes: through the screen center in shoulder mode, else the mouse
+local function aimPoint(): Vector3
+	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+		local vp = camera.ViewportSize
+		local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { player.Character :: Instance, tracerFolder }
+		local hit = workspace:Raycast(ray.Origin, ray.Direction * 400, params)
+		return if hit then hit.Position else ray.Origin + ray.Direction * 400
+	end
+	return mouse.Hit.Position
+end
+
+local function muzzleFlash(at: Vector3, color: Color3)
+	local f = make("Part", {
+		Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false, Shape = Enum.PartType.Ball,
+		Material = Enum.Material.Neon, Color = color, Size = Vector3.one * 0.9, CFrame = CFrame.new(at), Parent = tracerFolder,
+	})
+	make("PointLight", { Color = color, Range = 14, Brightness = 4, Parent = f })
+	Theme.tween(f, 0.06, { Size = Vector3.one * 0.2, Transparency = 1 })
+	Debris:AddItem(f, 0.07)
+end
+
 local function tryFire()
 	local tool = equippedBlaster()
-	if not tool or player:GetAttribute("Reloading") or player:GetAttribute("CrewStatus") ~= "alive" then
+	if not tool or player:GetAttribute("Reloading") or player:GetAttribute("CrewStatus") ~= "alive" or player:GetAttribute("Sprinting") then
 		return
 	end
 	local interval = player:GetAttribute("FireInterval") or Config.Weapon.FireInterval
@@ -123,16 +147,19 @@ local function tryFire()
 		Reload:FireServer()
 		return
 	end
-	local aim = mouse.Hit.Position
+	local aim = aimPoint()
 	Shoot:FireServer(aim)
-	-- local tracer for instant feedback
+	-- local tracer + muzzle flash for instant feedback
 	local from = muzzlePos()
 	if from then
 		tracer(from, aim, tracerColor(player))
+		muzzleFlash(from, tracerColor(player))
 	end
-	Theme.playSound(Config.Sounds.Shoot, 0.35, 0.95 + math.random() * 0.1)
-	-- tiny recoil
-	camera.CFrame *= CFrame.Angles(math.rad(0.35), 0, 0)
+	local minigun = player:GetAttribute("Weapon") == "Minigun"
+	Theme.playSound(Config.Sounds.Shoot, if minigun then 0.25 else 0.35, (if minigun then 1.15 else 0.95) + math.random() * 0.1)
+	-- recoil (small, constant buzz for the minigun; a kick for the blaster)
+	local kick = if minigun then 0.18 else 0.55
+	camera.CFrame *= CFrame.Angles(math.rad(kick), math.rad((math.random() - 0.5) * kick * 0.6), 0)
 end
 
 local function hookTool(tool: Tool)

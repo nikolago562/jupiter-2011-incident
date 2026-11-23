@@ -19,6 +19,11 @@ Config.REVIVE_HEALTH = 0.4 -- revived with 40% health
 
 Config.SPACESUITS = true -- dress everyone in white spacesuits with helmets
 
+-- Io (the moon landing) ---------------------------------------------------------------
+Config.LANDING_WAVE = 10 -- after clearing this wave the ship lands on Io
+Config.MOON_GRAVITY = 0.25 -- fraction of normal gravity (Io is 0.18g; 0.25 keeps it playable)
+Config.MOON_JUMP_POWER = 32 -- with low gravity this is a long, floaty jump
+
 -- Reactor (the thing the Keis want) ---------------------------------------------
 Config.REACTOR_MAX_HP = 1000
 Config.REPAIR_COST = 60
@@ -175,6 +180,7 @@ Config.Narration = {
 	GoldenEscaped = "The golden keis got away",
 	WaveClear = "Wave cleared. The keis are regrouping",
 	GameOver = "The incident was never reported",
+	Landing = "The USS Kepler lands on Io. The keis followed the ship down",
 }
 
 return Config
