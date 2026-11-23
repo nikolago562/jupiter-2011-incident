@@ -81,6 +81,12 @@ local function tracerColor(who: Player): Color3
 end
 
 local function muzzlePos(): Vector3?
+	-- first person: the viewmodel's muzzle (what you actually see), else the tool's
+	local vmModel = camera:FindFirstChild("Viewmodel")
+	local vmMuzzle = vmModel and vmModel:FindFirstChild("Muzzle") :: BasePart?
+	if vmMuzzle then
+		return vmMuzzle.Position
+	end
 	local tool = equippedBlaster()
 	local muzzle = tool and tool:FindFirstChild("Muzzle") :: BasePart?
 	return if muzzle then muzzle.Position else nil
@@ -110,12 +116,12 @@ end
 
 -- where the shot goes: through the screen center in shoulder mode, else the mouse
 local function aimPoint(): Vector3
-	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+	if true then -- first person: always shoot through the screen center
 		local vp = camera.ViewportSize
 		local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Exclude
-		params.FilterDescendantsInstances = { player.Character :: Instance, tracerFolder }
+		params.FilterDescendantsInstances = { player.Character :: Instance, tracerFolder, camera }
 		local hit = workspace:Raycast(ray.Origin, ray.Direction * 400, params)
 		return if hit then hit.Position else ray.Origin + ray.Direction * 400
 	end
@@ -156,7 +162,8 @@ local function tryFire()
 		muzzleFlash(from, tracerColor(player))
 	end
 	local minigun = player:GetAttribute("Weapon") == "Minigun"
-	Theme.playSound(Config.Sounds.Shoot, if minigun then 0.25 else 0.35, (if minigun then 1.15 else 0.95) + math.random() * 0.1)
+	player:SetAttribute("LastShot", os.clock()) -- Viewmodel.client plays the recoil
+	Theme.playSound(if minigun then Config.Sounds.MinigunShoot else Config.Sounds.Shoot, if minigun then 0.35 else 0.5, 0.95 + math.random() * 0.1)
 	-- recoil (small, constant buzz for the minigun; a kick for the blaster)
 	local kick = if minigun then 0.18 else 0.55
 	camera.CFrame *= CFrame.Angles(math.rad(kick), math.rad((math.random() - 0.5) * kick * 0.6), 0)
@@ -199,6 +206,11 @@ if player.Character then
 	hookCharacter(player.Character)
 end
 player.CharacterAdded:Connect(hookCharacter)
+player:GetAttributeChangedSignal("Reloading"):Connect(function()
+	if player:GetAttribute("Reloading") then
+		Theme.playSound(Config.Sounds.Reload, 0.6)
+	end
+end)
 
 ContextActionService:BindAction("JupiterReload", function(_, state)
 	if state == Enum.UserInputState.Begin then
@@ -211,7 +223,7 @@ ContextActionService:SetTitle("JupiterReload", "R")
 RunService.RenderStepped:Connect(function()
 	local tool = equippedBlaster()
 	local armed = tool ~= nil
-	cross.Visible = armed
+	cross.Visible = armed and not player:GetAttribute("ADS")
 	UserInputService.MouseIconEnabled = not armed
 	if armed then
 		local m = UserInputService:GetMouseLocation()

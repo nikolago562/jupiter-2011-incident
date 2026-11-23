@@ -8,11 +8,14 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 local Keis = require(script.Parent:WaitForChild("KeisAI"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local PerkSystem = require(script.Parent:WaitForChild("PerkSystem"))
+local WeaponModel = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("WeaponModel"))
 
 local Combat = {}
 
 type State = {
 	weapon: string,
+	attachments: { Optic: string, Laser: string, Muzzle: string },
+	owned: { [string]: boolean }, -- "Optic.RedDot" = true
 	credits: number,
 	upgrades: { [string]: number },
 	ammo: number,
@@ -54,19 +57,20 @@ function Combat.stats(player: Player)
 	local function perk(id: string): number
 		return PerkSystem.get(player, id)
 	end
+	local att = if st then st.attachments else { Optic = "Iron", Laser = "None", Muzzle = "None" }
 	local overclock = perk("Overclock")
 	local adrenaline = if (Combat.adrenalineUntil[player] or 0) > os.clock() then perk("Adrenaline") else 0
 	return {
-		damage = W.damage * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1))
+		damage = W.damage * (if att.Muzzle == "LongBarrel" then 1.12 else 1) * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1))
 			* (1 + 0.15 * perk("HollowPoints")) * (1 + 0.15 * overclock),
 		interval = W.interval * (0.88 ^ (up.FireRate or 0)) / (1 + 0.4 * overclock) / (1 + 0.3 * adrenaline),
 		mag = math.floor((W.mag + W.magPerLevel * (up.Mag or 0)) * (1 + 0.5 * perk("ExtendedMag"))),
 		reload = W.reload * (0.7 ^ perk("QuickHands")),
-		jitter = W.jitter,
+		jitter = W.jitter * (if att.Laser ~= "None" then 0.5 else 1) * (if att.Muzzle == "Compensator" then 0.6 else 1),
 		pellets = 1 + (up.Multishot or 0),
 		maxHealth = Config.BASE_HEALTH + 25 * (up.MaxHealth or 0) + 20 * perk("SuitPadding"),
 		walkSpeed = (Config.BASE_WALKSPEED + 1.5 * (up.Speed or 0)) * (1 + 0.08 * perk("LightStep")),
-		critChance = 0.1 * perk("CritLens"),
+		critChance = 0.1 * perk("CritLens") + (if att.Laser == "Red" then 0.03 elseif att.Laser == "Green" then 0.05 else 0),
 		critMult = Config.Weapon.CritMultiplier + 0.75 * perk("CritLens"),
 	}
 end
@@ -79,6 +83,12 @@ local function publish(player: Player)
 	local s = Combat.stats(player)
 	player:SetAttribute("Credits", st.credits)
 	player:SetAttribute("Weapon", st.weapon)
+	player:SetAttribute("Attachments", WeaponModel.encode(st.attachments))
+	local owned = {}
+	for k in st.owned do
+		table.insert(owned, k)
+	end
+	player:SetAttribute("OwnedAttachments", table.concat(owned, ","))
 	player:SetAttribute("Ammo", st.ammo)
 	player:SetAttribute("MagSize", s.mag)
 	player:SetAttribute("Reloading", st.reloading)
@@ -92,6 +102,8 @@ end
 function Combat.reset(player: Player)
 	states[player] = {
 		weapon = "Blaster",
+		attachments = { Optic = "Iron", Laser = "None", Muzzle = "None" },
+		owned = {},
 		credits = 0,
 		upgrades = {},
 		ammo = Config.Weapons.Blaster.mag,
@@ -161,57 +173,15 @@ function Combat.addKill(player: Player)
 	end
 end
 
-local function makeWeapon(weaponId: string): Tool
+local function makeWeapon(weaponId: string, att: any): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = if weaponId == "Minigun" then "Minigun" else "Blaster"
-	tool.ToolTip = "Hold to fire · R to reload"
+	tool.ToolTip = "Hold to fire · R reload · Right-click aim"
 	tool.CanBeDropped = false
 	tool:SetAttribute("IsWeapon", true)
-	local handle = Instance.new("Part")
-	handle.Name = "Handle"
-	handle.Size = Vector3.new(0.45, 1, 0.7)
-	handle.Color = Color3.fromRGB(60, 60, 64)
-	handle.Material = Enum.Material.Metal
-	handle.CanCollide = false
-	handle.Parent = tool
-	local function attach(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material, shape: Enum.PartType?)
-		local p = Instance.new("Part")
-		p.Name = name
-		if shape then
-			p.Shape = shape
-		end
-		p.Size = size
-		p.Color = color
-		p.Material = material
-		p.CanCollide = false
-		p.Massless = true
-		p.CFrame = handle.CFrame * offset
-		p.Parent = tool
-		local w = Instance.new("WeldConstraint")
-		w.Part0 = handle
-		w.Part1 = p
-		w.Parent = p
-	end
-	if weaponId == "Minigun" then
-		tool.Grip = CFrame.new(0, -0.3, 0.9)
-		local gunmetal = Color3.fromRGB(45, 46, 50)
-		attach("Body", Vector3.new(1, 1, 2.2), CFrame.new(0, 0.6, -0.9), gunmetal, Enum.Material.Metal)
-		-- six rotating-style barrels around a hub
-		for i = 0, 5 do
-			local a = i / 6 * math.pi * 2
-			attach("Barrel", Vector3.new(3.2, 0.22, 0.22), CFrame.new(math.cos(a) * 0.32, 0.6 + math.sin(a) * 0.32, -3.3) * CFrame.Angles(0, math.rad(90), 0),
-				Color3.fromRGB(70, 70, 74), Enum.Material.Metal, Enum.PartType.Cylinder)
-		end
-		attach("Hub", Vector3.new(0.3, 1, 1), CFrame.new(0, 0.6, -2.2) * CFrame.Angles(0, math.rad(90), 0), gunmetal, Enum.Material.Metal, Enum.PartType.Cylinder)
-		attach("Drum", Vector3.new(0.9, 1.1, 1.1), CFrame.new(0.75, 0.3, -0.6) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(150, 120, 60), Enum.Material.Metal, Enum.PartType.Cylinder)
-		attach("Stripe", Vector3.new(1.02, 0.15, 1.8), CFrame.new(0, 1.05, -0.9), Color3.fromRGB(255, 138, 61), Enum.Material.Neon)
-		attach("Muzzle", Vector3.new(0.3, 0.3, 0.2), CFrame.new(0, 0.6, -4.95), Color3.fromRGB(255, 170, 60), Enum.Material.Neon)
-	else
-		tool.Grip = CFrame.new(0, -0.2, 0.4)
-		attach("Body", Vector3.new(0.6, 0.6, 2), CFrame.new(0, 0.6, -0.6), Color3.fromRGB(230, 232, 238), Enum.Material.SmoothPlastic)
-		attach("Stripe", Vector3.new(0.62, 0.15, 1.6), CFrame.new(0, 0.75, -0.6), Color3.fromRGB(255, 138, 61), Enum.Material.Neon)
-		attach("Muzzle", Vector3.new(0.4, 0.4, 0.3), CFrame.new(0, 0.6, -1.75), Color3.fromRGB(90, 220, 255), Enum.Material.Neon)
-	end
+	tool:SetAttribute("WeaponId", weaponId)
+	local built = WeaponModel.build(weaponId, att, tool, "Handle")
+	tool.Grip = CFrame.new(built.grip.Position)
 	return tool
 end
 
@@ -237,7 +207,7 @@ local function giveWeapon(player: Player, humanoid: Humanoid)
 		end
 	end
 	local st = states[player]
-	local tool = makeWeapon(if st then st.weapon else "Blaster")
+	local tool = makeWeapon(if st then st.weapon else "Blaster", if st then st.attachments else { Optic = "Iron", Laser = "None", Muzzle = "None" })
 	tool.Parent = backpack
 	task.defer(function()
 		if humanoid.Parent and not player:GetAttribute("Downed") then
@@ -481,6 +451,32 @@ local function onBuy(player: Player, id: any)
 	;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, id)
 end
 
+local function onAttachment(player: Player, slot: any, id: any)
+	if type(slot) ~= "string" or type(id) ~= "string" then
+		return
+	end
+	local st = states[player]
+	local def = Config.attachment(slot, id)
+	if not st or not def or (slot ~= "Optic" and slot ~= "Laser" and slot ~= "Muzzle") then
+		return
+	end
+	local key = slot .. "." .. id
+	if def.price > 0 and not st.owned[key] then
+		if st.credits < def.price then
+			return
+		end
+		st.credits -= def.price
+		st.owned[key] = true
+		;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, key)
+	end
+	;(st.attachments :: any)[slot] = id
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		giveWeapon(player, humanoid)
+	end
+	publish(player)
+end
+
 local function onRepair(player: Player)
 	local st = states[player]
 	if not st or st.credits < Config.REPAIR_COST then
@@ -504,6 +500,7 @@ function Combat.init(remoteFolder: Folder)
 	end)
 	;(remotes:FindFirstChild("BuyUpgrade") :: RemoteEvent).OnServerEvent:Connect(onBuy)
 	;(remotes:FindFirstChild("RepairReactor") :: RemoteEvent).OnServerEvent:Connect(onRepair)
+	;(remotes:FindFirstChild("Attachment") :: RemoteEvent).OnServerEvent:Connect(onAttachment)
 end
 
 return Combat

@@ -12,7 +12,12 @@ July 14, 2011. Your crew is aboard the **USS KEPLER** in orbit around Jupiter. T
   warning signs, steam leaks, sparking panels, cables, lockers, pipes, floor grates and Future lighting with real shadows.
 - **Jupiter:** 110 color bands following its real cloud belts, the layered Great Red Spot, white ovals, haze, a soft night side,
   Io, Europa and Ganymede, a full starfield with the Milky Way and nebulas.
-- **Shooter feel:** over-the-shoulder camera with a center crosshair, sprint (Shift), recoil, muzzle flash, hit shake.
+- **First person:** detailed weapon viewmodel with suit arms, sway, bob, recoil, reload/sprint poses, aim down sights,
+  scope overlay for 4x/8x, Q/E lean, laser beam, spinning minigun barrels.
+- **Armory bench:** buy and swap optics (iron, red dot, holo, 4x ACOG, 8x scope), lasers (red, green) and muzzles
+  (compensator, long barrel) with a live 3D preview, plus upgrades and the minigun.
+- **Map detail:** pipes with elbows, flanges and valve wheels, junction boxes with blinking LEDs, pressure gauges,
+  spinning wall fans, sagging wire bundles, cable trays, conduits, steam, sparks.
 - **Io (after wave 10):** the ship lands on Jupiter's volcanic moon. Terrain with craters, lava lakes, a smoking volcano,
   sulfur fields, the landed ship, floodlights, and **25% gravity** (long floaty jumps, dust when you land).
 
@@ -91,9 +96,31 @@ After code changes, rebuild it with `python3 tools/build_place.py`.
 2. To test saving in Studio: **Game Settings → Security → Enable Studio Access to API Services**. The place must be published first.
 3. Press Play. It works solo.
 
-**Controls:** hold click to fire · **R** reload · **Q** upgrades · hold **E** on a downed crewmate to revive them.
+**Controls (first person):** hold click to fire · **right-click** aim down sights · **R** reload · **Shift** sprint · **Q / E** lean ·
+walk up to the **ARMORY** bench and press **E** to upgrade · hold **E** on a downed crewmate to revive them.
 
 ## Sounds
-Every slot is in `Config.Sounds`. The most important one is `KeisChant` ("keis keis keis o algo o algo"), which loops on every Keis in 3D.
-Upload audio you have the rights to, then paste the `rbxassetid://` ids.
-⚠️ Don't use real streamers' clips, names or faces. Roblox moderates them, and the game could lose its audio or get taken down.
+Roblox only plays audio uploaded to Roblox, so every sound has a ready file in this repo. Upload each one
+(Creator Hub → Creations → Development Items → Audio), then paste its id (`rbxassetid://123…`) into `Config.Sounds`:
+
+| Config key | File | Where you hear it |
+|---|---|---|
+| `KeisChant` | `assets/audio/keis_chant.ogg` | every Keis, with the floating chant text |
+| `BossChant` | `assets/audio/keis_chant_boss.ogg` | the Master Keis (optional) |
+| `ShipHum` | `assets/audio/sfx/ship_hum.ogg` | constant background on the ship |
+| `ReactorHum` | `sfx/reactor_hum.ogg` | 3D, the reactor and Io's generator |
+| `EngineRumble` | `sfx/engine_rumble.ogg` | 3D, engine room |
+| `Steam` | `sfx/steam_hiss.ogg` | 3D, every steam leak |
+| `Sparks` | `sfx/sparks.ogg` | 3D, every sparking panel |
+| `Alarm` | `sfx/alarm.ogg` | during waves |
+| `IoWind` | `sfx/io_wind.ogg` | constant background on Io |
+| `Shoot` / `MinigunShoot` | `sfx/blaster_shot.ogg` / `sfx/minigun_shot.ogg` | firing |
+| `Reload` | `sfx/reload.ogg` | reloading |
+| `Door` | `sfx/door_slide.ogg` | 3D, sliding doors |
+| `KeyPickup` | `sfx/key_pickup.ogg` | picking up keys |
+| `Hit` / `Kill` | `sfx/hit_marker.ogg` / `sfx/keis_death.ogg` | hits and kills |
+| `WaveStart`, `LevelUp`, `Buy`, `UIClick`, `CrateOpen` | matching files in `sfx/` | UI |
+| `Footstep` | `sfx/footstep_metal.ogg` | (spare) |
+
+All the `sfx/` sounds were generated for this game, so you own them. Don't use real streamers' clips, names or faces:
+Roblox moderates them.

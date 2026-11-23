@@ -180,9 +180,10 @@ text({ Font = F.Title, TextSize = 18, Position = UDim2.fromOffset(20, 16), Size 
 text({ Font = F.Body, TextSize = 15, Position = UDim2.fromOffset(20, 50), Size = UDim2.new(1, -40, 1, -60), TextWrapped = true,
 	TextYAlignment = Enum.TextYAlignment.Top, TextColor3 = C.Cream, Parent = how,
 	Text = "The Keis crawl out of the vents in waves. Keep them away from the reactor and keep your crew alive.\n\n"
-		.. "• Hold click to fire · Shift to sprint · R to reload\n"
+		.. "• Hold click to fire · Right-click to aim · R reload\n"
+		.. "• Shift to sprint · Q / E to lean around corners\n"
 		.. "• Shoot a Keis in the mouth for a CRIT\n"
-		.. "• Spend credits between waves: Q opens the Upgrade Terminal\n"
+		.. "• Upgrade and add scopes, lasers and barrels at the ARMORY bench on the bridge\n"
 		.. "• Hold E on a downed crewmate to revive them\n"
 		.. "• Survive wave 10 and the ship lands on Io, Jupiter's volcanic moon. Low gravity." })
 howBtn.MouseButton1Click:Connect(function()
@@ -191,7 +192,7 @@ end)
 
 -- Menu lifecycle ----------------------------------------------------------------------------------
 local menuOpen = true
-local HIDE = { "HUD", "Combat", "Shop", "Atmosphere" }
+local HIDE = { "HUD", "Combat", "Atmosphere", "Scope" }
 local function setGameGuis(enabled: boolean)
 	for _, name in HIDE do
 		local g = player.PlayerGui:FindFirstChild(name)

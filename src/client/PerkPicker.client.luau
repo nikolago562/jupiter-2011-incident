@@ -23,7 +23,9 @@ local scale = make("UIScale", { Parent = gui })
 RunService.RenderStepped:Connect(function()
 	scale.Scale = math.clamp(camera.ViewportSize.Y / 900, 0.6, 1.1)
 end)
-make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45, BorderSizePixel = 0, Parent = gui })
+-- a Modal button frees the mouse while in first person
+make("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45, BorderSizePixel = 0,
+	Text = "", AutoButtonColor = false, Modal = true, Parent = gui })
 local header = text({ Font = F.Title, TextSize = 34, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.2), Size = UDim2.fromOffset(900, 44), Text = "CHOOSE A PERK", Parent = gui })
 local subheader = text({ Font = F.Mono, TextSize = 16, TextColor3 = C.Muted, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5),

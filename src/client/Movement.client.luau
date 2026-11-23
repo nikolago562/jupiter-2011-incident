@@ -1,5 +1,5 @@
 --!strict
--- Movement feel: over-the-shoulder shooter camera, sprint, camera bob, hit shake, moon dust.
+-- Movement feel: sprint, head bob, hit shake, moon dust. (First person + aiming: Viewmodel.client)
 
 local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
@@ -13,15 +13,11 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-local SHOULDER = Vector3.new(1.9, 0.5, 0)
 local SPRINT_MULT = 1.45
 
-player.CameraMinZoomDistance = 6
-player.CameraMaxZoomDistance = 22
 
 local sprinting = false
 local sprintBase = 16
-local shoulderWas = false
 local offset = Vector3.zero
 local shake = 0
 local bobT = 0
@@ -108,23 +104,7 @@ RunService:BindToRenderStep("JupiterMovement", Enum.RenderPriority.Camera.Value 
 	if not humanoid or not root or camera.CameraType ~= Enum.CameraType.Custom then
 		return
 	end
-	local alive = humanoid.Health > 0 and not player:GetAttribute("Downed")
-	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-	local shoulder = alive and hasWeapon() and not touchOnly and not sprinting and not player:GetAttribute("UIOpen")
-
-	if shoulder then
-		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		humanoid.AutoRotate = false
-		local look = camera.CFrame.LookVector
-		local flat = Vector3.new(look.X, 0, look.Z)
-		if flat.Magnitude > 0.01 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-		end
-	elseif shoulderWas then
-		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		humanoid.AutoRotate = true
-	end
-	shoulderWas = shoulder
+	-- (first person + aiming live in Viewmodel.client)
 
 	-- walking bob
 	local v = root.AssemblyLinearVelocity
@@ -134,13 +114,8 @@ RunService:BindToRenderStep("JupiterMovement", Enum.RenderPriority.Camera.Value 
 	local bob = if humanoid.FloorMaterial ~= Enum.Material.Air
 		then Vector3.new(math.sin(bobT) * 0.07, math.abs(math.cos(bobT)) * 0.1, 0) * amount
 		else Vector3.zero
-	local target = (if shoulder then SHOULDER else Vector3.zero) + bob
-	offset = offset:Lerp(target, math.min(dt * 10, 1))
+	offset = offset:Lerp(bob * 0.6, math.min(dt * 10, 1)) -- a little head bob
 	humanoid.CameraOffset = offset
-
-	-- sprint FOV kick
-	local fov = 70 + (if sprinting and speed > 2 then 9 else 0)
-	camera.FieldOfView += (fov - camera.FieldOfView) * math.min(dt * 6, 1)
 
 	-- hit shake
 	if shake > 0 then

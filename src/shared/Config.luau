@@ -97,11 +97,41 @@ Config.Weapon = {
 }
 -- Everyone starts with the Blaster. The minigun is unlocked in the Upgrade Terminal.
 Config.Weapons = {
-	Blaster = { name = "BLASTER", damage = 20, interval = 0.2, mag = 15, magPerLevel = 5, reload = 1.5, jitter = 0,
+	Blaster = { name = "BLASTER", damage = 20, interval = 0.2, mag = 15, magPerLevel = 5, reload = 1.5, jitter = 0.014,
 		tracer = Color3.fromRGB(90, 220, 255) },
 	Minigun = { name = "M-2011 MINIGUN", damage = 11, interval = 0.065, mag = 100, magPerLevel = 25, reload = 3.2, jitter = 0.035,
 		tracer = Color3.fromRGB(255, 170, 60), cost = 450 },
 }
+
+-- Attachments (bought at the Armory bench with credits; reset every run) ---------------------------
+-- zoom = how much aiming down sights (right click) magnifies.
+Config.Attachments = {
+	Optic = {
+		{ id = "Iron", name = "IRON SIGHTS", price = 0, zoom = 1.15, desc = "Standard sights" },
+		{ id = "RedDot", name = "RED DOT", price = 40, zoom = 1.3, desc = "Clean red dot, fast aiming" },
+		{ id = "Holo", name = "HOLO SIGHT", price = 60, zoom = 1.45, desc = "Holographic ring reticle" },
+		{ id = "ACOG", name = "4x ACOG", price = 110, zoom = 2.6, desc = "Magnified mid-range scope" },
+		{ id = "Sniper", name = "8x SCOPE", price = 180, zoom = 5, desc = "Long-range scope, full overlay" },
+	},
+	Laser = {
+		{ id = "None", name = "NO LASER", price = 0, desc = "" },
+		{ id = "Red", name = "RED LASER", price = 50, desc = "Tighter hip fire, +3% crit chance", color = Color3.fromRGB(255, 40, 40) },
+		{ id = "Green", name = "GREEN LASER", price = 60, desc = "Tighter hip fire, +5% crit chance", color = Color3.fromRGB(60, 255, 90) },
+	},
+	Muzzle = {
+		{ id = "None", name = "STANDARD", price = 0, desc = "" },
+		{ id = "Compensator", name = "COMPENSATOR", price = 55, desc = "Much less recoil and spread" },
+		{ id = "LongBarrel", name = "LONG BARREL", price = 75, desc = "+12% damage" },
+	},
+}
+function Config.attachment(slot: string, id: string): any
+	for _, a in (Config.Attachments :: any)[slot] or {} do
+		if a.id == id then
+			return a
+		end
+	end
+	return nil
+end
 
 -- Upgrades (bought with credits; reset every run) ------------------------------------------------
 Config.Upgrades = {
@@ -152,14 +182,29 @@ Config.Sounds = {
 	KeisChant = "",
 	-- optional: upload assets/audio/keis_chant_boss.ogg. If empty, the boss plays KeisChant slowed down.
 	BossChant = "",
-	Music = "", -- background loop
-	WaveStart = "",
-	Alarm = "",
-	Shoot = "",
-	Hit = "",
-	Kill = "",
-	LevelUp = "",
-	Buy = "",
+	Music = "", -- optional background music loop
+
+	-- Everything below has a ready file in assets/audio/sfx/ (see README → Sounds)
+	ShipHum = "", -- ship_hum.ogg       constant background hum on the ship
+	ReactorHum = "", -- reactor_hum.ogg    3D, from the reactor / generator
+	EngineRumble = "", -- engine_rumble.ogg  3D, engine room
+	Steam = "", -- steam_hiss.ogg     3D, every steam leak
+	Sparks = "", -- sparks.ogg         3D, every sparking panel
+	Alarm = "", -- alarm.ogg          during waves
+	IoWind = "", -- io_wind.ogg        constant background on Io
+	Shoot = "", -- blaster_shot.ogg
+	MinigunShoot = "", -- minigun_shot.ogg
+	Reload = "", -- reload.ogg
+	Footstep = "", -- footstep_metal.ogg
+	Door = "", -- door_slide.ogg     3D, sliding doors
+	KeyPickup = "", -- key_pickup.ogg
+	UIClick = "", -- ui_click.ogg
+	Hit = "", -- hit_marker.ogg
+	Kill = "", -- keis_death.ogg
+	WaveStart = "", -- wave_start.ogg
+	LevelUp = "", -- level_up.ogg
+	Buy = "", -- buy.ogg
+	CrateOpen = "", -- crate_open.ogg
 }
 
 Config.KEIS_CHANT_CHANCE = 0.5 -- chance a Keis chants each cycle (text + sound)

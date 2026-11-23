@@ -4,6 +4,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SpaceArt = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpaceArt"))
+local Props = require(script.Parent:WaitForChild("Props"))
 
 local MoonBuilder = {}
 
@@ -52,6 +53,7 @@ export type MoonInfo = {
 	vents: { Vector3 },
 	roomCenters: { Vector3 },
 	space: { Instance },
+	armoryPrompt: ProximityPrompt,
 }
 
 function MoonBuilder.clear()
@@ -256,6 +258,9 @@ function MoonBuilder.build(): MoonInfo
 		spot.Parent = head
 	end
 
+	-- armory bench next to the ramp
+	local armoryPrompt = Props.armoryBench(folder, CFrame.new(S + Vector3.new(16, 0, -24)))
+
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
 	spawn.Neutral = true
@@ -316,6 +321,7 @@ function MoonBuilder.build(): MoonInfo
 		vents = vents,
 		roomCenters = roomCenters,
 		space = space,
+		armoryPrompt = armoryPrompt,
 	}
 end
 

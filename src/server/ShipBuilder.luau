@@ -10,6 +10,8 @@
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SpaceArt = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpaceArt"))
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Props = require(script.Parent:WaitForChild("Props"))
 local Lighting = game:GetService("Lighting")
 
 local ShipBuilder = {}
@@ -67,6 +69,7 @@ local HAZARD_Y = Color3.fromRGB(230, 180, 30)
 local PIPE = Color3.fromRGB(96, 92, 86)
 local GRATE = Color3.fromRGB(24, 25, 28)
 local RIB = Color3.fromRGB(120, 124, 128)
+local STEEL_RING = Color3.fromRGB(150, 154, 160)
 
 local function hazardPost(parent: Instance, size: Vector3, cf: CFrame)
 	-- yellow/black striped post (stacked bands)
@@ -95,6 +98,23 @@ local function sectorLabel(parent: Instance, cf: CFrame, code: string)
 	l.TextTransparency = 0.15
 	l.Text = code
 	l.Parent = sg
+end
+
+-- a looping 3D sound if its id is set in Config.Sounds
+local function sound3d(parent: Instance, id: string, volume: number, range: number, speed: number?)
+	if id == "" then
+		return
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Looped = true
+	s.Volume = volume
+	s.PlaybackSpeed = speed or 1
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 4
+	s.RollOffMaxDistance = range
+	s.Parent = parent
+	s:Play()
 end
 
 -- Detail pass ----------------------------------------------------------------------------------------
@@ -292,6 +312,7 @@ local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
 			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 1) }),
 			Color = ColorSequence.new(Color3.fromRGB(220, 225, 230)), LightInfluence = 0.8,
 		})
+		sound3d(holder, Config.Sounds.Steam, 0.5, 28, rng:NextNumber(0.9, 1.1))
 	end
 
 	-- a broken, sparking wall panel in some rooms
@@ -305,6 +326,7 @@ local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
 			SpreadAngle = Vector2.new(60, 60), Acceleration = Vector3.new(0, -40, 0), LightEmission = 1,
 			Size = NumberSequence.new(0.25, 0), Color = ColorSequence.new(Color3.fromRGB(255, 200, 90)),
 		})
+		sound3d(box, Config.Sounds.Sparks, 0.6, 30)
 		local l = light(box, Color3.fromRGB(255, 170, 80), 12, 1.2)
 		task.spawn(function()
 			while box.Parent do
@@ -326,6 +348,224 @@ local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
 				deco(folder, Vector3.new(1.2, 0.12, 0.1), CFrame.new(x, 5.6 + k * 0.4, wallZ + facing * 0.92), Color3.fromRGB(30, 30, 35), Enum.Material.Metal)
 			end
 		end
+	end
+end
+
+-- Greebles: the "stuff sticking out" pass --------------------------------------------------------------
+local COPPER = Color3.fromRGB(170, 100, 60)
+local VALVE_RED = Color3.fromRGB(180, 40, 35)
+
+local function cyl(parent: Instance, len: number, d: number, cf: CFrame, color: Color3, material: Enum.Material?): Part
+	-- cylinder along the CFrame's X axis
+	local p = deco(parent, Vector3.new(len, d, d), cf, color, material or Enum.Material.Metal)
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+
+local function ball(parent: Instance, d: number, pos: Vector3, color: Color3): Part
+	local p = deco(parent, Vector3.one * d, CFrame.new(pos), color, Enum.Material.Metal)
+	p.Shape = Enum.PartType.Ball
+	return p
+end
+
+-- a pipe that sticks out of the wall, bends, and runs to the floor or ceiling, with flanges and a valve wheel
+local function wallPipe(parent: Instance, base: Vector3, inward: Vector3, rng: Random)
+	local color = if rng:NextNumber() < 0.5 then PIPE else COPPER
+	local d = rng:NextNumber(0.6, 0.9)
+	local out = rng:NextNumber(1.4, 2.2)
+	local y = rng:NextNumber(4, 9)
+	local start = base + Vector3.new(0, y, 0)
+	local elbow = start + inward * out
+	cyl(parent, out, d, CFrame.lookAt(start + inward * out / 2, elbow) * CFrame.Angles(0, math.rad(90), 0), color)
+	cyl(parent, 0.25, d + 0.35, CFrame.lookAt(start + inward * 0.15, elbow) * CFrame.Angles(0, math.rad(90), 0), STEEL_RING)
+	ball(parent, d * 1.15, elbow, color)
+	local up = rng:NextNumber() < 0.5
+	local endY = if up then H - 0.5 else 0
+	local runLen = math.abs(endY - y)
+	local mid = elbow + Vector3.new(0, (endY - y) / 2, 0)
+	cyl(parent, runLen, d, CFrame.new(mid) * CFrame.Angles(0, 0, math.rad(90)), color)
+	local k = 2
+	while k < runLen - 0.5 do
+		cyl(parent, 0.25, d + 0.3, CFrame.new(elbow + Vector3.new(0, (if up then 1 else -1) * k, 0)) * CFrame.Angles(0, 0, math.rad(90)), STEEL_RING)
+		k += 3
+	end
+	-- valve wheel on the horizontal stub
+	local vpos = start + inward * (out * 0.5) + Vector3.new(0, d / 2 + 0.45, 0)
+	cyl(parent, 0.4, 0.15, CFrame.new(vpos - Vector3.new(0, 0.25, 0)) * CFrame.Angles(0, 0, math.rad(90)), STEEL_RING)
+	for i = 0, 7 do
+		local a = i / 8 * math.pi * 2
+		deco(parent, Vector3.new(0.38, 0.1, 0.12), CFrame.new(vpos + Vector3.new(math.cos(a) * 0.45, 0, math.sin(a) * 0.45)) * CFrame.Angles(0, -a + math.pi / 2, 0),
+			VALVE_RED, Enum.Material.Metal)
+	end
+	for i = 0, 1 do
+		local a = i * math.pi / 2
+		deco(parent, Vector3.new(0.9, 0.06, 0.08), CFrame.new(vpos) * CFrame.Angles(0, a, 0), VALVE_RED, Enum.Material.Metal)
+	end
+end
+
+local function junctionBox(parent: Instance, base: Vector3, inward: Vector3, rng: Random)
+	local pos = base + Vector3.new(0, 5.5, 0) + inward * 0.45
+	local face = CFrame.lookAt(pos, pos + inward)
+	part(parent, Vector3.new(2.2, 2.8, 0.9), face, Color3.fromRGB(90, 96, 104), Enum.Material.Metal)
+	deco(parent, Vector3.new(1.9, 2.5, 0.08), face * CFrame.new(0, 0, -0.48), Color3.fromRGB(110, 116, 124), Enum.Material.Metal)
+	deco(parent, Vector3.new(0.12, 0.5, 0.1), face * CFrame.new(0.75, 0, -0.55), Color3.fromRGB(30, 30, 30), Enum.Material.Metal)
+	deco(parent, Vector3.new(0.9, 0.5, 0.02), face * CFrame.new(-0.3, 0.8, -0.53), HAZARD_Y, Enum.Material.SmoothPlastic)
+	for i = 0, 2 do
+		local led = deco(parent, Vector3.new(0.14, 0.14, 0.06), face * CFrame.new(-0.6 + i * 0.3, -0.9, -0.54),
+			if i == 0 then Color3.fromRGB(80, 255, 120) elseif i == 1 then Color3.fromRGB(255, 190, 40) else Color3.fromRGB(255, 50, 40), Enum.Material.Neon)
+		led:SetAttribute("BlinkRate", rng:NextNumber(0.3, 2))
+		CollectionService:AddTag(led, "BlinkLED")
+	end
+	-- conduit up to the ceiling
+	local top = pos + Vector3.new(0, 1.4, 0)
+	cyl(parent, H - top.Y, 0.35, CFrame.new(top + Vector3.new(0, (H - top.Y) / 2, 0)) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(40, 42, 46))
+end
+
+local function gauges(parent: Instance, base: Vector3, inward: Vector3, rng: Random)
+	local pos = base + Vector3.new(0, 6, 0) + inward * 0.9
+	local along = inward:Cross(Vector3.yAxis)
+	cyl(parent, 3.2, 0.5, CFrame.lookAt(pos, pos + along) * CFrame.Angles(0, math.rad(90), 0), PIPE)
+	for i = -1, 1 do
+		local gp = pos + along * i * 1.1 + Vector3.new(0, 0.75, 0)
+		cyl(parent, 0.5, 0.25, CFrame.new(gp - Vector3.new(0, 0.4, 0)) * CFrame.Angles(0, 0, math.rad(90)), STEEL_RING)
+		local dial = cyl(parent, 0.2, 0.9, CFrame.lookAt(gp, gp + inward) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(40, 40, 44))
+		local face = deco(parent, Vector3.new(0.75, 0.75, 0.02), CFrame.lookAt(gp + inward * 0.11, gp + inward * 2), Color3.new(1, 1, 1))
+		face.Transparency = 1
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = Enum.NormalId.Front
+		sg.CanvasSize = Vector2.new(100, 100)
+		sg.LightInfluence = 0.6
+		sg.Parent = face
+		local bg = Instance.new("Frame")
+		bg.Size = UDim2.fromScale(1, 1)
+		bg.BackgroundColor3 = Color3.fromRGB(235, 232, 220)
+		bg.Parent = sg
+		Instance.new("UICorner", bg).CornerRadius = UDim.new(0.5, 0)
+		local red = Instance.new("Frame")
+		red.AnchorPoint = Vector2.new(0.5, 0.5)
+		red.Position = UDim2.fromScale(0.78, 0.3)
+		red.Size = UDim2.fromScale(0.18, 0.18)
+		red.BackgroundColor3 = Color3.fromRGB(220, 50, 40)
+		red.Parent = bg
+		Instance.new("UICorner", red).CornerRadius = UDim.new(0.5, 0)
+		local needle = Instance.new("Frame")
+		needle.Name = "Needle"
+		needle.AnchorPoint = Vector2.new(0.5, 1)
+		needle.Position = UDim2.fromScale(0.5, 0.5)
+		needle.Size = UDim2.fromScale(0.05, 0.42)
+		needle.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		needle.BorderSizePixel = 0
+		needle.Rotation = rng:NextNumber(-60, 60)
+		needle.Parent = bg
+		CollectionService:AddTag(face, "Gauge")
+		local _ = dial
+	end
+end
+
+local function wallFan(parent: Instance, base: Vector3, inward: Vector3)
+	local pos = base + Vector3.new(0, 11.5, 0) + inward * 0.6
+	local face = CFrame.lookAt(pos, pos + inward)
+	for _, o in { { 0, 1.5, 3.4, 0.3 }, { 0, -1.5, 3.4, 0.3 }, { 1.55, 0, 0.3, 3.4 }, { -1.55, 0, 0.3, 3.4 } } do
+		deco(parent, Vector3.new(o[3], o[4], 0.5), face * CFrame.new(o[1], o[2], 0), STEEL_RING, Enum.Material.Metal)
+	end
+	deco(parent, Vector3.new(3, 3, 0.1), face * CFrame.new(0, 0, 0.2), Color3.fromRGB(15, 15, 18), Enum.Material.SmoothPlastic)
+	local fan = Instance.new("Model")
+	fan.Name = "Fan"
+	fan.Parent = parent
+	local hub = cyl(fan, 0.3, 0.6, face * CFrame.new(0, 0, -0.05) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(60, 62, 68))
+	fan.PrimaryPart = hub
+	for i = 0, 3 do
+		deco(fan, Vector3.new(0.5, 1.3, 0.06), face * CFrame.Angles(0, 0, i * math.pi / 2) * CFrame.new(0, 0.75, -0.05) * CFrame.Angles(0, math.rad(20), 0),
+			Color3.fromRGB(80, 84, 90), Enum.Material.Metal)
+	end
+	CollectionService:AddTag(fan, "Fan")
+	-- grille bars in front
+	for i = -2, 2 do
+		deco(parent, Vector3.new(0.06, 3, 0.06), face * CFrame.new(i * 0.6, 0, -0.3), STEEL_RING, Enum.Material.Metal)
+	end
+end
+
+-- a bundle of wires sagging across the ceiling
+local function sagWire(parent: Instance, a: Vector3, b: Vector3, sag: number, color: Color3, thickness: number)
+	local segs = 8
+	local prev = a
+	for i = 1, segs do
+		local t = i / segs
+		local p = a:Lerp(b, t) - Vector3.new(0, sag * 4 * t * (1 - t), 0)
+		local len = (p - prev).Magnitude
+		cyl(parent, len + 0.05, thickness, CFrame.lookAt((prev + p) / 2, p) * CFrame.Angles(0, math.rad(90), 0), color, Enum.Material.SmoothPlastic)
+		prev = p
+	end
+end
+
+local function greebleRoom(folder: Folder, def: RoomDef, rng: Random)
+	local c, sx, sz = def.center, def.size.X, def.size.Y
+	local alongX = sx >= sz
+	local long, short = math.max(sx, sz), math.min(sx, sz)
+	local placed = 0
+	for _, side in { "N", "S", "E", "W" } do
+		local sideAlongX = side == "N" or side == "S"
+		local length = if sideAlongX then sx else sz
+		local spots = freeSpots(def, side, length, 4)
+		local inward = if side == "N" then Vector3.new(0, 0, 1) elseif side == "S" then Vector3.new(0, 0, -1)
+			elseif side == "E" then Vector3.new(-1, 0, 0) else Vector3.new(1, 0, 0)
+		local fixed = if side == "N" then c.Z - sz / 2 + 1 elseif side == "S" then c.Z + sz / 2 - 1 elseif side == "E" then c.X + sx / 2 - 1 else c.X - sx / 2 + 1
+		local used: { number } = {}
+		for _ = 1, 3 do
+			if #spots == 0 or placed >= 7 then
+				break
+			end
+			local t = spots[rng:NextInteger(1, #spots)]
+			local clash = false
+			for _, u in used do
+				if math.abs(u - t) < 4 then
+					clash = true
+				end
+			end
+			if not clash then
+				table.insert(used, t)
+				placed += 1
+				local base = if sideAlongX then Vector3.new(c.X + t, c.Y, fixed) else Vector3.new(fixed, c.Y, c.Z + t)
+				local roll = rng:NextNumber()
+				if roll < 0.4 then
+					wallPipe(folder, base, inward, rng)
+				elseif roll < 0.65 then
+					junctionBox(folder, base, inward, rng)
+				elseif roll < 0.85 then
+					gauges(folder, base, inward, rng)
+				else
+					wallFan(folder, base, inward)
+				end
+			end
+		end
+	end
+
+	-- wires sagging across the ceiling (short axis)
+	for i = 1, 2 do
+		local t = rng:NextNumber(-long / 2 + 3, long / 2 - 3)
+		local a = if alongX then c + Vector3.new(t, H - 1.2, -short / 2 + 1.5) else c + Vector3.new(-short / 2 + 1.5, H - 1.2, t)
+		local b = if alongX then c + Vector3.new(t + rng:NextNumber(-3, 3), H - 1.2, short / 2 - 1.5) else c + Vector3.new(short / 2 - 1.5, H - 1.2, t + rng:NextNumber(-3, 3))
+		local colors = { Color3.fromRGB(20, 20, 22), Color3.fromRGB(160, 40, 35), Color3.fromRGB(220, 180, 40), Color3.fromRGB(40, 80, 160) }
+		for k = 0, 2 do
+			sagWire(folder, a + Vector3.new(0, -k * 0.2, k * 0.15), b + Vector3.new(0, -k * 0.2, k * 0.15), rng:NextNumber(1.2, 2.8) + k * 0.2,
+				colors[((i + k) % #colors) + 1], 0.16)
+		end
+	end
+
+	-- floor conduit along one long wall + cable tray along the ceiling
+	local side = if rng:NextNumber() < 0.5 then 1 else -1
+	local conduitPos = if alongX then c + Vector3.new(0, 0.35, side * (short / 2 - 1.5)) else c + Vector3.new(side * (short / 2 - 1.5), 0.35, 0)
+	local csize = if alongX then Vector3.new(long - 6, 0.7, 0.8) else Vector3.new(0.8, 0.7, long - 6)
+	deco(folder, csize, CFrame.new(conduitPos), Color3.fromRGB(60, 64, 70), Enum.Material.Metal)
+	local trayPos = if alongX then c + Vector3.new(0, H - 2.6, -side * (short / 2 - 3)) else c + Vector3.new(-side * (short / 2 - 3), H - 2.6, 0)
+	local tsize = if alongX then Vector3.new(long - 4, 0.15, 1.6) else Vector3.new(1.6, 0.15, long - 4)
+	deco(folder, tsize, CFrame.new(trayPos), Color3.fromRGB(90, 94, 100), Enum.Material.DiamondPlate)
+	for k = 0, 3 do
+		local off = Vector3.new(0, 0.15, -0.5 + k * 0.33)
+		local cable = deco(folder, if alongX then Vector3.new(long - 4.5, 0.22, 0.22) else Vector3.new(0.22, 0.22, long - 4.5),
+			CFrame.new(trayPos + (if alongX then off else Vector3.new(off.Z, off.Y, 0))),
+			if k % 2 == 0 then Color3.fromRGB(25, 25, 28) else Color3.fromRGB(150, 40, 35), Enum.Material.SmoothPlastic)
+		local _ = cable
 	end
 end
 
@@ -513,6 +753,7 @@ export type ShipInfo = {
 	roomCenters: { Vector3 },
 	leaderboard: Frame,
 	space: { Instance },
+	armoryPrompt: ProximityPrompt,
 }
 
 function ShipBuilder.build(): ShipInfo
@@ -583,6 +824,7 @@ function ShipBuilder.build(): ShipInfo
 	for _, def in rooms do
 		folders[def.name] = buildRoom(ship, def)
 		detailRoom(folders[def.name], def, detailRng)
+		greebleRoom(folders[def.name], def, detailRng)
 		table.insert(roomCenters, def.center)
 	end
 
@@ -593,6 +835,7 @@ function ShipBuilder.build(): ShipInfo
 	local core = part(rf, Vector3.new(12, 6, 6), CFrame.new(0, 9, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(90, 220, 255), Enum.Material.Neon, "ReactorCore")
 	core.Shape = Enum.PartType.Cylinder
 	light(core, Color3.fromRGB(90, 220, 255), 40, 2.5)
+	sound3d(core, Config.Sounds.ReactorHum, 0.8, 60)
 	for k, y in { 5, 9, 13 } do
 		local ring = deco(rf, Vector3.new(0.8, 10 + k, 10 + k), CFrame.new(0, y, 0) * CFrame.Angles(0, 0, math.rad(90)), HULL, Enum.Material.Metal)
 		ring.Shape = Enum.PartType.Cylinder
@@ -622,6 +865,8 @@ function ShipBuilder.build(): ShipInfo
 	boardFrame.Size = UDim2.fromScale(1, 1)
 	boardFrame.BackgroundColor3 = Color3.fromRGB(14, 11, 18)
 	boardFrame.Parent = sg
+
+	local armoryPrompt = Props.armoryBench(bf, CFrame.new(79, 0, 12.5))
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
@@ -654,6 +899,7 @@ function ShipBuilder.build(): ShipInfo
 		eng.Shape = Enum.PartType.Cylinder
 		local glowRing = deco(ef, Vector3.new(1, 7.6, 7.6), CFrame.new(x, 10, -52) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(255, 120, 50), Enum.Material.Neon)
 		glowRing.Shape = Enum.PartType.Cylinder
+		sound3d(eng, Config.Sounds.EngineRumble, 0.9, 50)
 	end
 	local of = folders["Observation Deck"]
 	for _, x in { -10, 0, 10 } do
@@ -712,6 +958,7 @@ function ShipBuilder.build(): ShipInfo
 		roomCenters = roomCenters,
 		leaderboard = boardFrame,
 		space = space,
+		armoryPrompt = armoryPrompt,
 	}
 end
 

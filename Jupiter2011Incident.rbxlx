@@ -1,7 +1,7 @@
 <roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
 <Item class="Workspace" referent="RBX00000001"><Properties><string name="Name">Workspace</string><bool name="StreamingEnabled">false</bool></Properties></Item>
 <Item class="Lighting" referent="RBX00000002"><Properties><string name="Name">Lighting</string><token name="Technology">4</token></Properties></Item>
-<Item class="ReplicatedStorage" referent="RBX00000008"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX00000007"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX00000003"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ReplicatedStorage" referent="RBX00000009"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX00000008"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX00000003"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--!strict
 -- JUPITER 2011 INCIDENT — every tunable value lives here.
 
 local Config = {}
@@ -100,11 +100,41 @@ Config.Weapon = {
 }
 -- Everyone starts with the Blaster. The minigun is unlocked in the Upgrade Terminal.
 Config.Weapons = {
-	Blaster = { name = "BLASTER", damage = 20, interval = 0.2, mag = 15, magPerLevel = 5, reload = 1.5, jitter = 0,
+	Blaster = { name = "BLASTER", damage = 20, interval = 0.2, mag = 15, magPerLevel = 5, reload = 1.5, jitter = 0.014,
 		tracer = Color3.fromRGB(90, 220, 255) },
 	Minigun = { name = "M-2011 MINIGUN", damage = 11, interval = 0.065, mag = 100, magPerLevel = 25, reload = 3.2, jitter = 0.035,
 		tracer = Color3.fromRGB(255, 170, 60), cost = 450 },
 }
+
+-- Attachments (bought at the Armory bench with credits; reset every run) ---------------------------
+-- zoom = how much aiming down sights (right click) magnifies.
+Config.Attachments = {
+	Optic = {
+		{ id = "Iron", name = "IRON SIGHTS", price = 0, zoom = 1.15, desc = "Standard sights" },
+		{ id = "RedDot", name = "RED DOT", price = 40, zoom = 1.3, desc = "Clean red dot, fast aiming" },
+		{ id = "Holo", name = "HOLO SIGHT", price = 60, zoom = 1.45, desc = "Holographic ring reticle" },
+		{ id = "ACOG", name = "4x ACOG", price = 110, zoom = 2.6, desc = "Magnified mid-range scope" },
+		{ id = "Sniper", name = "8x SCOPE", price = 180, zoom = 5, desc = "Long-range scope, full overlay" },
+	},
+	Laser = {
+		{ id = "None", name = "NO LASER", price = 0, desc = "" },
+		{ id = "Red", name = "RED LASER", price = 50, desc = "Tighter hip fire, +3% crit chance", color = Color3.fromRGB(255, 40, 40) },
+		{ id = "Green", name = "GREEN LASER", price = 60, desc = "Tighter hip fire, +5% crit chance", color = Color3.fromRGB(60, 255, 90) },
+	},
+	Muzzle = {
+		{ id = "None", name = "STANDARD", price = 0, desc = "" },
+		{ id = "Compensator", name = "COMPENSATOR", price = 55, desc = "Much less recoil and spread" },
+		{ id = "LongBarrel", name = "LONG BARREL", price = 75, desc = "+12% damage" },
+	},
+}
+function Config.attachment(slot: string, id: string): any
+	for _, a in (Config.Attachments :: any)[slot] or {} do
+		if a.id == id then
+			return a
+		end
+	end
+	return nil
+end
 
 -- Upgrades (bought with credits; reset every run) ------------------------------------------------
 Config.Upgrades = {
@@ -155,14 +185,29 @@ Config.Sounds = {
 	KeisChant = "",
 	-- optional: upload assets/audio/keis_chant_boss.ogg. If empty, the boss plays KeisChant slowed down.
 	BossChant = "",
-	Music = "", -- background loop
-	WaveStart = "",
-	Alarm = "",
-	Shoot = "",
-	Hit = "",
-	Kill = "",
-	LevelUp = "",
-	Buy = "",
+	Music = "", -- optional background music loop
+
+	-- Everything below has a ready file in assets/audio/sfx/ (see README → Sounds)
+	ShipHum = "", -- ship_hum.ogg       constant background hum on the ship
+	ReactorHum = "", -- reactor_hum.ogg    3D, from the reactor / generator
+	EngineRumble = "", -- engine_rumble.ogg  3D, engine room
+	Steam = "", -- steam_hiss.ogg     3D, every steam leak
+	Sparks = "", -- sparks.ogg         3D, every sparking panel
+	Alarm = "", -- alarm.ogg          during waves
+	IoWind = "", -- io_wind.ogg        constant background on Io
+	Shoot = "", -- blaster_shot.ogg
+	MinigunShoot = "", -- minigun_shot.ogg
+	Reload = "", -- reload.ogg
+	Footstep = "", -- footstep_metal.ogg
+	Door = "", -- door_slide.ogg     3D, sliding doors
+	KeyPickup = "", -- key_pickup.ogg
+	UIClick = "", -- ui_click.ogg
+	Hit = "", -- hit_marker.ogg
+	Kill = "", -- keis_death.ogg
+	WaveStart = "", -- wave_start.ogg
+	LevelUp = "", -- level_up.ogg
+	Buy = "", -- buy.ogg
+	CrateOpen = "", -- crate_open.ogg
 }
 
 Config.KEIS_CHANT_CHANCE = 0.5 -- chance a Keis chants each cycle (text + sound)
@@ -755,9 +800,317 @@ end
 
 return SpaceArt
 ]]></ProtectedString></Properties></Item>
+<Item class="ModuleScript" referent="RBX00000007"><Properties><string name="Name">WeaponModel</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Detailed weapon models built from parts, with attachments (optic / laser / muzzle).
+-- Used by the server (the tool other players see), the client viewmodel (first person) and the Armory preview.
+-- Convention: the weapon points down -Z, +Y is up, the root part sits at the origin.
+
+local WeaponModel = {}
+
+export type Attachments = { Optic: string, Laser: string, Muzzle: string }
+export type Built = {
+	root: BasePart,
+	muzzle: BasePart, -- invisible part at the barrel tip
+	laser: BasePart?, -- invisible part at the laser lens
+	sight: CFrame, -- where your eye goes when aiming down sights (relative to root)
+	grip: CFrame, -- where the right hand holds it (relative to root)
+	foregrip: CFrame, -- where the left hand holds it
+	spin: Motor6D?, -- minigun barrel joint (clients spin it)
+	parts: { BasePart },
+}
+
+local WHITE = Color3.fromRGB(226, 228, 232)
+local DARK = Color3.fromRGB(46, 48, 54)
+local GUNMETAL = Color3.fromRGB(70, 72, 78)
+local BLACK = Color3.fromRGB(18, 18, 20)
+local ORANGE = Color3.fromRGB(255, 138, 61)
+local CYAN = Color3.fromRGB(90, 220, 255)
+local OLIVE = Color3.fromRGB(88, 94, 60)
+local BRASS = Color3.fromRGB(200, 160, 70)
+local GLASS = Color3.fromRGB(150, 200, 230)
+
+local function axisZ(): CFrame
+	return CFrame.Angles(0, math.rad(90), 0) -- turns a cylinder's X axis to point along Z
+end
+
+function WeaponModel.build(weaponId: string, att: Attachments, parent: Instance, rootName: string?): Built
+	local parts: { BasePart } = {}
+	local root = Instance.new("Part")
+	root.Name = rootName or "Root"
+	root.CFrame = CFrame.new()
+	root.CanCollide = false
+	root.CanQuery = false
+	root.CanTouch = false
+	root.Massless = true
+	root.Material = Enum.Material.SmoothPlastic
+
+	local function add(name: string, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?, attachTo: BasePart?): Part
+		local p = Instance.new("Part")
+		p.Name = name
+		if shape then
+			p.Shape = shape
+		end
+		p.Size = size
+		p.CFrame = (attachTo or root).CFrame * cf
+		p.Color = color
+		p.Material = material or Enum.Material.SmoothPlastic
+		p.CanCollide = false
+		p.CanQuery = false
+		p.CanTouch = false
+		p.Massless = true
+		p.CastShadow = false
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
+		p.Parent = parent
+		local w = Instance.new("WeldConstraint")
+		w.Part0 = attachTo or root
+		w.Part1 = p
+		w.Parent = p
+		table.insert(parts, p)
+		return p
+	end
+	local function marker(name: string, cf: CFrame): Part
+		local p = add(name, Vector3.new(0.05, 0.05, 0.05), cf, BLACK)
+		p.Transparency = 1
+		return p
+	end
+
+	local mountY: number -- top of the rail where optics sit
+	local mountZ = 0 -- optic center along the gun
+	local laserAt: CFrame
+	local muzzleZ: number
+	local barrelY: number
+	local ironSight: CFrame
+	local grip: CFrame
+	local foregrip: CFrame
+	local spin: Motor6D? = nil
+
+	if weaponId == "Minigun" then
+		root.Size = Vector3.new(0.8, 0.75, 1.3)
+		root.Color = GUNMETAL
+		root.Material = Enum.Material.Metal
+		root.Parent = parent
+		table.insert(parts, root)
+		add("Motor", Vector3.new(0.62, 0.6, 0.6), CFrame.new(0, 0, 0.95), DARK, Enum.Material.Metal)
+		for i = 0, 3 do
+			add("Fin", Vector3.new(0.66, 0.04, 0.5), CFrame.new(0, -0.22 + i * 0.15, 0.95), BLACK, Enum.Material.Metal)
+		end
+		add("StripeL", Vector3.new(0.02, 0.1, 1.1), CFrame.new(-0.41, 0.12, 0), ORANGE)
+		add("StripeR", Vector3.new(0.02, 0.1, 1.1), CFrame.new(0.41, 0.12, 0), ORANGE)
+		add("FrontPlate", Vector3.new(0.86, 0.8, 0.1), CFrame.new(0, 0, -0.7), DARK, Enum.Material.Metal)
+		-- carry handle with a rail on top
+		for _, z in { -0.4, 0.4 } do
+			add("HandlePost", Vector3.new(0.08, 0.3, 0.08), CFrame.new(0, 0.52, z), DARK, Enum.Material.Metal)
+		end
+		add("HandleBar", Vector3.new(0.1, 0.1, 0.92), CFrame.new(0, 0.7, 0), DARK, Enum.Material.Metal)
+		add("Rail", Vector3.new(0.22, 0.05, 0.7), CFrame.new(0, 0.77, 0), BLACK, Enum.Material.Metal)
+		mountY, mountZ = 0.8, 0
+		-- spade grips at the back
+		for _, x in { -0.25, 0.25 } do
+			add("Spade", Vector3.new(0.1, 0.55, 0.1), CFrame.new(x, -0.05, 1.4), BLACK, Enum.Material.Fabric)
+		end
+		add("SpadeBar", Vector3.new(0.6, 0.08, 0.08), CFrame.new(0, 0.22, 1.4), DARK, Enum.Material.Metal)
+		add("Trigger", Vector3.new(0.08, 0.08, 0.06), CFrame.new(0.25, 0.25, 1.4), Color3.fromRGB(255, 50, 40), Enum.Material.Neon)
+		-- ammo box + belt
+		add("AmmoBox", Vector3.new(0.6, 0.65, 0.85), CFrame.new(0.75, -0.25, 0.1), OLIVE, Enum.Material.Metal)
+		add("AmmoLid", Vector3.new(0.62, 0.06, 0.87), CFrame.new(0.75, 0.1, 0.1), Color3.fromRGB(70, 75, 48), Enum.Material.Metal)
+		add("Stencil", Vector3.new(0.02, 0.2, 0.5), CFrame.new(1.06, -0.25, 0.1), Color3.fromRGB(220, 210, 160))
+		for i = 0, 4 do
+			add("Belt", Vector3.new(0.12, 0.12, 0.14), CFrame.new(0.62 - i * 0.05, 0.18 + i * 0.05, 0.05 - i * 0.12) * CFrame.Angles(0, 0, math.rad(20)), BRASS, Enum.Material.Metal)
+		end
+		-- rotating barrel cluster on a Motor6D
+		local hub = add("Hub", Vector3.new(0.3, 0.56, 0.56), CFrame.new(0, 0, -0.9) * axisZ(), GUNMETAL, Enum.Material.Metal, Enum.PartType.Cylinder)
+		hub:FindFirstChildOfClass("WeldConstraint"):Destroy()
+		local motor = Instance.new("Motor6D")
+		motor.Name = "Spin"
+		motor.Part0 = root
+		motor.Part1 = hub
+		motor.C0 = CFrame.new(0, 0, -0.9) * axisZ()
+		motor.Parent = root
+		spin = motor
+		for i = 0, 5 do
+			local a = i / 6 * math.pi * 2
+			add("Barrel", Vector3.new(2.6, 0.17, 0.17), CFrame.new(0, math.cos(a) * 0.2, math.sin(a) * 0.2) * CFrame.new(1.3, 0, 0), -- hub local +X points forward
+				Color3.fromRGB(60, 60, 64), Enum.Material.Metal, Enum.PartType.Cylinder, hub)
+		end
+		for _, x in { 0.7, 2.0, 2.55 } do
+			add("Clamp", Vector3.new(0.12, 0.62, 0.62), CFrame.new(x, 0, 0), DARK, Enum.Material.Metal, Enum.PartType.Cylinder, hub)
+		end
+		barrelY, muzzleZ = 0, -3.55
+		laserAt = CFrame.new(-0.48, 0.12, -0.55)
+		ironSight = CFrame.new(0, 0.86, 0.9)
+		add("IronRing", Vector3.new(0.04, 0.12, 0.12), CFrame.new(0, 0.86, -0.35) * axisZ(), BLACK, Enum.Material.Metal, Enum.PartType.Cylinder)
+		grip = CFrame.new(0.25, -0.05, 1.4)
+		foregrip = CFrame.new(-0.25, 0.65, 0)
+	else
+		-- BLASTER: sci-fi carbine
+		root.Size = Vector3.new(0.5, 0.55, 1.6)
+		root.Color = WHITE
+		root.Parent = parent
+		table.insert(parts, root)
+		add("UpperReceiver", Vector3.new(0.46, 0.18, 1.5), CFrame.new(0, 0.36, -0.05), DARK, Enum.Material.Metal)
+		add("Rail", Vector3.new(0.3, 0.06, 1.3), CFrame.new(0, 0.48, -0.05), BLACK, Enum.Material.Metal)
+		for i = 0, 5 do
+			add("RailNotch", Vector3.new(0.32, 0.04, 0.06), CFrame.new(0, 0.52, -0.6 + i * 0.22), BLACK, Enum.Material.Metal)
+		end
+		mountY, mountZ = 0.52, 0.05
+		for _, x in { -0.26, 0.26 } do
+			add("Stripe", Vector3.new(0.02, 0.08, 1.1), CFrame.new(x, 0.05, 0), ORANGE)
+			for _, z in { -0.55, 0.45 } do
+				add("Bolt", Vector3.new(0.04, 0.07, 0.07), CFrame.new(x + (if x > 0 then 0.01 else -0.01), -0.15, z), GUNMETAL, Enum.Material.Metal, Enum.PartType.Cylinder)
+			end
+		end
+		add("EjectionPort", Vector3.new(0.02, 0.14, 0.35), CFrame.new(0.26, 0.18, -0.2), BLACK)
+		add("ChargingHandle", Vector3.new(0.12, 0.07, 0.22), CFrame.new(0.31, 0.3, 0.45), DARK, Enum.Material.Metal)
+		add("StatusLED", Vector3.new(0.05, 0.05, 0.05), CFrame.new(-0.26, 0.28, 0.55), Color3.fromRGB(80, 255, 120), Enum.Material.Neon)
+		-- shroud with cooling vents
+		add("Shroud", Vector3.new(0.4, 0.4, 1.3), CFrame.new(0, 0.12, -1.45), DARK, Enum.Material.Metal)
+		add("ShroudRail", Vector3.new(0.26, 0.05, 0.9), CFrame.new(0, 0.345, -1.45), BLACK, Enum.Material.Metal)
+		for k = 0, 2 do
+			for _, x in { -0.205, 0.205 } do
+				add("Vent", Vector3.new(0.02, 0.09, 0.22), CFrame.new(x, 0.14, -1.05 - k * 0.35), BLACK)
+			end
+		end
+		add("CoilGlow", Vector3.new(0.41, 0.05, 0.9), CFrame.new(0, -0.06, -1.45), CYAN, Enum.Material.Neon)
+		local long = att.Muzzle == "LongBarrel"
+		local barrelLen = if long then 1.25 else 0.65
+		add("Barrel", Vector3.new(barrelLen, 0.2, 0.2), CFrame.new(0, 0.12, -2.1 - barrelLen / 2) * axisZ(), GUNMETAL, Enum.Material.Metal, Enum.PartType.Cylinder)
+		barrelY, muzzleZ = 0.12, -2.1 - barrelLen
+		-- energy cell (magazine)
+		add("Cell", Vector3.new(0.28, 0.62, 0.4), CFrame.new(0, -0.48, -0.35) * CFrame.Angles(math.rad(-8), 0, 0), DARK, Enum.Material.Metal)
+		add("CellWindow", Vector3.new(0.3, 0.36, 0.1), CFrame.new(0, -0.45, -0.52) * CFrame.Angles(math.rad(-8), 0, 0), CYAN, Enum.Material.Neon)
+		add("CellCap", Vector3.new(0.3, 0.08, 0.42), CFrame.new(0, -0.79, -0.31) * CFrame.Angles(math.rad(-8), 0, 0), BLACK, Enum.Material.Metal)
+		add("TriggerGuard", Vector3.new(0.06, 0.06, 0.42), CFrame.new(0, -0.36, 0.12), DARK, Enum.Material.Metal)
+		add("Trigger", Vector3.new(0.04, 0.16, 0.04), CFrame.new(0, -0.28, 0.06), BLACK, Enum.Material.Metal)
+		add("Grip", Vector3.new(0.26, 0.62, 0.34), CFrame.new(0, -0.5, 0.42) * CFrame.Angles(math.rad(18), 0, 0), BLACK, Enum.Material.Fabric)
+		add("StockTube", Vector3.new(0.7, 0.18, 0.18), CFrame.new(0, 0.05, 1.12) * axisZ(), GUNMETAL, Enum.Material.Metal, Enum.PartType.Cylinder)
+		add("Stock", Vector3.new(0.24, 0.42, 0.55), CFrame.new(0, -0.08, 1.45), WHITE)
+		add("ButtPad", Vector3.new(0.26, 0.5, 0.08), CFrame.new(0, -0.08, 1.76), BLACK, Enum.Material.Fabric)
+		add("Foregrip", Vector3.new(0.2, 0.38, 0.24), CFrame.new(0, -0.24, -1.3), BLACK, Enum.Material.Fabric)
+		laserAt = CFrame.new(0.25, 0.02, -1.5)
+		ironSight = CFrame.new(0, 0.6, 0.95)
+		grip = CFrame.new(0, -0.45, 0.42)
+		foregrip = CFrame.new(0, -0.3, -1.3)
+	end
+
+	-- Muzzle device --------------------------------------------------------------------------------
+	if weaponId ~= "Minigun" then
+		if att.Muzzle == "Compensator" then
+			add("Compensator", Vector3.new(0.3, 0.3, 0.42), CFrame.new(0, barrelY, muzzleZ - 0.2), DARK, Enum.Material.Metal)
+			for k = 0, 2 do
+				add("Port", Vector3.new(0.18, 0.02, 0.06), CFrame.new(0, barrelY + 0.15, muzzleZ - 0.08 - k * 0.12), BLACK)
+			end
+			muzzleZ -= 0.42
+		else
+			add("MuzzleBrake", Vector3.new(0.26, 0.26, 0.18), CFrame.new(0, barrelY, muzzleZ - 0.09), BLACK, Enum.Material.Metal)
+			muzzleZ -= 0.18
+		end
+	end
+	local muzzle = marker("Muzzle", CFrame.new(0, barrelY, muzzleZ - 0.05))
+
+	-- Optic -------------------------------------------------------------------------------------------
+	local sightY = ironSight.Y
+	local optic = att.Optic or "Iron"
+	local my, mz = mountY, mountZ
+	if optic == "Iron" then
+		if weaponId ~= "Minigun" then
+			add("FrontSightBase", Vector3.new(0.12, 0.1, 0.12), CFrame.new(0, 0.42, -1.95), BLACK, Enum.Material.Metal)
+			add("FrontSightPost", Vector3.new(0.03, 0.14, 0.03), CFrame.new(0, 0.53, -1.95), BLACK, Enum.Material.Metal)
+			add("RearSightL", Vector3.new(0.05, 0.14, 0.08), CFrame.new(-0.07, 0.6, 0.55), BLACK, Enum.Material.Metal)
+			add("RearSightR", Vector3.new(0.05, 0.14, 0.08), CFrame.new(0.07, 0.6, 0.55), BLACK, Enum.Material.Metal)
+			sightY = 0.58
+		end
+	elseif optic == "RedDot" then
+		add("OpticBase", Vector3.new(0.2, 0.06, 0.32), CFrame.new(0, my + 0.03, mz), BLACK, Enum.Material.Metal)
+		for _, x in { -0.12, 0.12 } do
+			add("OpticPost", Vector3.new(0.04, 0.26, 0.3), CFrame.new(x, my + 0.18, mz), DARK, Enum.Material.Metal)
+		end
+		add("OpticTop", Vector3.new(0.28, 0.04, 0.3), CFrame.new(0, my + 0.32, mz), DARK, Enum.Material.Metal)
+		local glass = add("OpticGlass", Vector3.new(0.2, 0.22, 0.02), CFrame.new(0, my + 0.18, mz - 0.1), GLASS, Enum.Material.Glass)
+		glass.Transparency = 0.7
+		add("RedDot", Vector3.new(0.018, 0.018, 0.01), CFrame.new(0, my + 0.18, mz - 0.11), Color3.fromRGB(255, 30, 30), Enum.Material.Neon)
+		sightY = my + 0.18
+	elseif optic == "Holo" then
+		add("OpticBase", Vector3.new(0.26, 0.06, 0.46), CFrame.new(0, my + 0.03, mz), BLACK, Enum.Material.Metal)
+		add("HoloBody", Vector3.new(0.3, 0.1, 0.46), CFrame.new(0, my + 0.1, mz), DARK, Enum.Material.Metal)
+		for _, x in { -0.15, 0.15 } do
+			add("HoloPost", Vector3.new(0.04, 0.24, 0.4), CFrame.new(x, my + 0.26, mz - 0.03), DARK, Enum.Material.Metal)
+		end
+		add("HoloTop", Vector3.new(0.34, 0.05, 0.42), CFrame.new(0, my + 0.4, mz - 0.03), DARK, Enum.Material.Metal)
+		local glass = add("OpticGlass", Vector3.new(0.26, 0.22, 0.02), CFrame.new(0, my + 0.26, mz - 0.18), GLASS, Enum.Material.Glass)
+		glass.Transparency = 0.7
+		local c = Color3.fromRGB(255, 60, 50)
+		for i = 0, 7 do
+			local a = i / 8 * math.pi * 2
+			add("Reticle", Vector3.new(0.014, 0.014, 0.01), CFrame.new(math.cos(a) * 0.05, my + 0.26 + math.sin(a) * 0.05, mz - 0.19), c, Enum.Material.Neon)
+		end
+		add("Reticle", Vector3.new(0.012, 0.012, 0.01), CFrame.new(0, my + 0.26, mz - 0.19), c, Enum.Material.Neon)
+		sightY = my + 0.26
+	elseif optic == "ACOG" or optic == "Sniper" then
+		local sniper = optic == "Sniper"
+		local len = if sniper then 1.25 else 0.72
+		local r = if sniper then 0.3 else 0.27
+		local h = if sniper then 0.3 else 0.24
+		for _, z in { -len * 0.3, len * 0.3 } do
+			add("ScopeMount", Vector3.new(0.16, h - 0.04, 0.1), CFrame.new(0, my + (h - 0.04) / 2, mz + z), BLACK, Enum.Material.Metal)
+			add("ScopeRing", Vector3.new(0.1, r + 0.06, r + 0.06), CFrame.new(0, my + h, mz + z) * axisZ(), DARK, Enum.Material.Metal, Enum.PartType.Cylinder)
+		end
+		add("ScopeTube", Vector3.new(len, r, r), CFrame.new(0, my + h, mz) * axisZ(), BLACK, Enum.Material.Metal, Enum.PartType.Cylinder)
+		add("ScopeBellFront", Vector3.new(if sniper then 0.3 else 0.12, r + 0.12, r + 0.12), CFrame.new(0, my + h, mz - len / 2) * axisZ(), BLACK, Enum.Material.Metal, Enum.PartType.Cylinder)
+		add("ScopeBellRear", Vector3.new(0.16, r + 0.06, r + 0.06), CFrame.new(0, my + h, mz + len / 2) * axisZ(), BLACK, Enum.Material.Metal, Enum.PartType.Cylinder)
+		local lens = add("Lens", Vector3.new(0.02, r + 0.08, r + 0.08), CFrame.new(0, my + h, mz - len / 2 - (if sniper then 0.16 else 0.07)) * axisZ(),
+			Color3.fromRGB(120, 170, 255), Enum.Material.Glass, Enum.PartType.Cylinder)
+		lens.Transparency = 0.35
+		if sniper then
+			add("TurretTop", Vector3.new(0.14, 0.14, 0.14), CFrame.new(0, my + h + 0.2, mz) * CFrame.Angles(0, 0, math.rad(90)), DARK, Enum.Material.Metal, Enum.PartType.Cylinder)
+			add("TurretSide", Vector3.new(0.14, 0.14, 0.14), CFrame.new(0.2, my + h, mz), DARK, Enum.Material.Metal, Enum.PartType.Cylinder)
+		else
+			add("AcogFin", Vector3.new(0.04, 0.08, 0.3), CFrame.new(0, my + h + 0.17, mz), Color3.fromRGB(255, 60, 40), Enum.Material.Neon)
+		end
+		sightY = my + h
+	end
+
+	-- Laser ---------------------------------------------------------------------------------------------
+	local laserPart: BasePart? = nil
+	if att.Laser and att.Laser ~= "None" then
+		local color = if att.Laser == "Green" then Color3.fromRGB(60, 255, 90) else Color3.fromRGB(255, 40, 40)
+		add("LaserBox", Vector3.new(0.16, 0.16, 0.42), laserAt, DARK, Enum.Material.Metal)
+		add("LaserLens", Vector3.new(0.08, 0.08, 0.03), laserAt * CFrame.new(0, 0, -0.22), color, Enum.Material.Neon)
+		add("LaserSwitch", Vector3.new(0.04, 0.05, 0.08), laserAt * CFrame.new(0, 0.09, 0.1), color, Enum.Material.Neon)
+		laserPart = marker("LaserEmitter", laserAt * CFrame.new(0, 0, -0.25))
+		laserPart:SetAttribute("Color", color)
+	end
+
+	return {
+		root = root,
+		muzzle = muzzle,
+		laser = laserPart,
+		sight = CFrame.new(0, sightY, ironSight.Z),
+		grip = grip,
+		foregrip = foregrip,
+		spin = spin,
+		parts = parts,
+	}
+end
+
+-- "Optic=RedDot;Laser=Red;Muzzle=None" <-> table
+function WeaponModel.decode(s: string?): Attachments
+	local out = { Optic = "Iron", Laser = "None", Muzzle = "None" }
+	for k, v in string.gmatch(s or "", "(%w+)=(%w+)") do
+		(out :: any)[k] = v
+	end
+	return out
+end
+
+function WeaponModel.encode(a: Attachments): string
+	return `Optic={a.Optic};Laser={a.Laser};Muzzle={a.Muzzle}`
+end
+
+return WeaponModel
+]]></ProtectedString></Properties></Item>
 </Item>
 </Item>
-<Item class="ServerScriptService" referent="RBX00000014"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX00000013"><Properties><string name="Name">Server</string></Properties><Item class="ModuleScript" referent="RBX00000009"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ServerScriptService" referent="RBX00000016"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX00000015"><Properties><string name="Name">Server</string></Properties><Item class="ModuleScript" referent="RBX0000000A"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Weapons, credits and upgrades. The server checks every shot and purchase; clients only send intent.
 
 local Players = game:GetService("Players")
@@ -767,11 +1120,14 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 local Keis = require(script.Parent:WaitForChild("KeisAI"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local PerkSystem = require(script.Parent:WaitForChild("PerkSystem"))
+local WeaponModel = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("WeaponModel"))
 
 local Combat = {}
 
 type State = {
 	weapon: string,
+	attachments: { Optic: string, Laser: string, Muzzle: string },
+	owned: { [string]: boolean }, -- "Optic.RedDot" = true
 	credits: number,
 	upgrades: { [string]: number },
 	ammo: number,
@@ -813,19 +1169,20 @@ function Combat.stats(player: Player)
 	local function perk(id: string): number
 		return PerkSystem.get(player, id)
 	end
+	local att = if st then st.attachments else { Optic = "Iron", Laser = "None", Muzzle = "None" }
 	local overclock = perk("Overclock")
 	local adrenaline = if (Combat.adrenalineUntil[player] or 0) > os.clock() then perk("Adrenaline") else 0
 	return {
-		damage = W.damage * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1))
+		damage = W.damage * (if att.Muzzle == "LongBarrel" then 1.12 else 1) * (1 + 0.2 * (up.Damage or 0)) * (1 + Config.LEVEL_DAMAGE_BONUS * (level - 1))
 			* (1 + 0.15 * perk("HollowPoints")) * (1 + 0.15 * overclock),
 		interval = W.interval * (0.88 ^ (up.FireRate or 0)) / (1 + 0.4 * overclock) / (1 + 0.3 * adrenaline),
 		mag = math.floor((W.mag + W.magPerLevel * (up.Mag or 0)) * (1 + 0.5 * perk("ExtendedMag"))),
 		reload = W.reload * (0.7 ^ perk("QuickHands")),
-		jitter = W.jitter,
+		jitter = W.jitter * (if att.Laser ~= "None" then 0.5 else 1) * (if att.Muzzle == "Compensator" then 0.6 else 1),
 		pellets = 1 + (up.Multishot or 0),
 		maxHealth = Config.BASE_HEALTH + 25 * (up.MaxHealth or 0) + 20 * perk("SuitPadding"),
 		walkSpeed = (Config.BASE_WALKSPEED + 1.5 * (up.Speed or 0)) * (1 + 0.08 * perk("LightStep")),
-		critChance = 0.1 * perk("CritLens"),
+		critChance = 0.1 * perk("CritLens") + (if att.Laser == "Red" then 0.03 elseif att.Laser == "Green" then 0.05 else 0),
 		critMult = Config.Weapon.CritMultiplier + 0.75 * perk("CritLens"),
 	}
 end
@@ -838,6 +1195,12 @@ local function publish(player: Player)
 	local s = Combat.stats(player)
 	player:SetAttribute("Credits", st.credits)
 	player:SetAttribute("Weapon", st.weapon)
+	player:SetAttribute("Attachments", WeaponModel.encode(st.attachments))
+	local owned = {}
+	for k in st.owned do
+		table.insert(owned, k)
+	end
+	player:SetAttribute("OwnedAttachments", table.concat(owned, ","))
 	player:SetAttribute("Ammo", st.ammo)
 	player:SetAttribute("MagSize", s.mag)
 	player:SetAttribute("Reloading", st.reloading)
@@ -851,6 +1214,8 @@ end
 function Combat.reset(player: Player)
 	states[player] = {
 		weapon = "Blaster",
+		attachments = { Optic = "Iron", Laser = "None", Muzzle = "None" },
+		owned = {},
 		credits = 0,
 		upgrades = {},
 		ammo = Config.Weapons.Blaster.mag,
@@ -920,57 +1285,15 @@ function Combat.addKill(player: Player)
 	end
 end
 
-local function makeWeapon(weaponId: string): Tool
+local function makeWeapon(weaponId: string, att: any): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = if weaponId == "Minigun" then "Minigun" else "Blaster"
-	tool.ToolTip = "Hold to fire · R to reload"
+	tool.ToolTip = "Hold to fire · R reload · Right-click aim"
 	tool.CanBeDropped = false
 	tool:SetAttribute("IsWeapon", true)
-	local handle = Instance.new("Part")
-	handle.Name = "Handle"
-	handle.Size = Vector3.new(0.45, 1, 0.7)
-	handle.Color = Color3.fromRGB(60, 60, 64)
-	handle.Material = Enum.Material.Metal
-	handle.CanCollide = false
-	handle.Parent = tool
-	local function attach(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material, shape: Enum.PartType?)
-		local p = Instance.new("Part")
-		p.Name = name
-		if shape then
-			p.Shape = shape
-		end
-		p.Size = size
-		p.Color = color
-		p.Material = material
-		p.CanCollide = false
-		p.Massless = true
-		p.CFrame = handle.CFrame * offset
-		p.Parent = tool
-		local w = Instance.new("WeldConstraint")
-		w.Part0 = handle
-		w.Part1 = p
-		w.Parent = p
-	end
-	if weaponId == "Minigun" then
-		tool.Grip = CFrame.new(0, -0.3, 0.9)
-		local gunmetal = Color3.fromRGB(45, 46, 50)
-		attach("Body", Vector3.new(1, 1, 2.2), CFrame.new(0, 0.6, -0.9), gunmetal, Enum.Material.Metal)
-		-- six rotating-style barrels around a hub
-		for i = 0, 5 do
-			local a = i / 6 * math.pi * 2
-			attach("Barrel", Vector3.new(3.2, 0.22, 0.22), CFrame.new(math.cos(a) * 0.32, 0.6 + math.sin(a) * 0.32, -3.3) * CFrame.Angles(0, math.rad(90), 0),
-				Color3.fromRGB(70, 70, 74), Enum.Material.Metal, Enum.PartType.Cylinder)
-		end
-		attach("Hub", Vector3.new(0.3, 1, 1), CFrame.new(0, 0.6, -2.2) * CFrame.Angles(0, math.rad(90), 0), gunmetal, Enum.Material.Metal, Enum.PartType.Cylinder)
-		attach("Drum", Vector3.new(0.9, 1.1, 1.1), CFrame.new(0.75, 0.3, -0.6) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(150, 120, 60), Enum.Material.Metal, Enum.PartType.Cylinder)
-		attach("Stripe", Vector3.new(1.02, 0.15, 1.8), CFrame.new(0, 1.05, -0.9), Color3.fromRGB(255, 138, 61), Enum.Material.Neon)
-		attach("Muzzle", Vector3.new(0.3, 0.3, 0.2), CFrame.new(0, 0.6, -4.95), Color3.fromRGB(255, 170, 60), Enum.Material.Neon)
-	else
-		tool.Grip = CFrame.new(0, -0.2, 0.4)
-		attach("Body", Vector3.new(0.6, 0.6, 2), CFrame.new(0, 0.6, -0.6), Color3.fromRGB(230, 232, 238), Enum.Material.SmoothPlastic)
-		attach("Stripe", Vector3.new(0.62, 0.15, 1.6), CFrame.new(0, 0.75, -0.6), Color3.fromRGB(255, 138, 61), Enum.Material.Neon)
-		attach("Muzzle", Vector3.new(0.4, 0.4, 0.3), CFrame.new(0, 0.6, -1.75), Color3.fromRGB(90, 220, 255), Enum.Material.Neon)
-	end
+	tool:SetAttribute("WeaponId", weaponId)
+	local built = WeaponModel.build(weaponId, att, tool, "Handle")
+	tool.Grip = CFrame.new(built.grip.Position)
 	return tool
 end
 
@@ -996,7 +1319,7 @@ local function giveWeapon(player: Player, humanoid: Humanoid)
 		end
 	end
 	local st = states[player]
-	local tool = makeWeapon(if st then st.weapon else "Blaster")
+	local tool = makeWeapon(if st then st.weapon else "Blaster", if st then st.attachments else { Optic = "Iron", Laser = "None", Muzzle = "None" })
 	tool.Parent = backpack
 	task.defer(function()
 		if humanoid.Parent and not player:GetAttribute("Downed") then
@@ -1240,6 +1563,32 @@ local function onBuy(player: Player, id: any)
 	;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, id)
 end
 
+local function onAttachment(player: Player, slot: any, id: any)
+	if type(slot) ~= "string" or type(id) ~= "string" then
+		return
+	end
+	local st = states[player]
+	local def = Config.attachment(slot, id)
+	if not st or not def or (slot ~= "Optic" and slot ~= "Laser" and slot ~= "Muzzle") then
+		return
+	end
+	local key = slot .. "." .. id
+	if def.price > 0 and not st.owned[key] then
+		if st.credits < def.price then
+			return
+		end
+		st.credits -= def.price
+		st.owned[key] = true
+		;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, key)
+	end
+	;(st.attachments :: any)[slot] = id
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		giveWeapon(player, humanoid)
+	end
+	publish(player)
+end
+
 local function onRepair(player: Player)
 	local st = states[player]
 	if not st or st.credits < Config.REPAIR_COST then
@@ -1263,11 +1612,12 @@ function Combat.init(remoteFolder: Folder)
 	end)
 	;(remotes:FindFirstChild("BuyUpgrade") :: RemoteEvent).OnServerEvent:Connect(onBuy)
 	;(remotes:FindFirstChild("RepairReactor") :: RemoteEvent).OnServerEvent:Connect(onRepair)
+	;(remotes:FindFirstChild("Attachment") :: RemoteEvent).OnServerEvent:Connect(onAttachment)
 end
 
 return Combat
 ]]></ProtectedString></Properties></Item>
-<Item class="Script" referent="RBX0000000A"><Properties><string name="Name">GameManager</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="Script" referent="RBX0000000B"><Properties><string name="Name">GameManager</string><ProtectedString name="Source"><![CDATA[--!strict
 -- JUPITER 2011 INCIDENT — run / wave loop.
 -- Lobby → Wave 1 → break (shop) → Wave 2 → … → the reactor falls or the whole crew is down → Game Over → Lobby.
 
@@ -1306,7 +1656,8 @@ for _, name in {
 	"Transition", -- (text, seconds) fade to black and back
 	"PerkOffer", -- (offerId, cards, rarity) pick-1-of-3
 	"Arc", -- (kind, points) chain lightning / ricochet / explosion visuals
-	"PickPerk", "RerollPerk", -- client → server
+	"OpenArmory", -- () open the armory screen
+	"PickPerk", "RerollPerk", "Attachment", -- client → server
 	"Shoot", "Reload", "BuyUpgrade", "RepairReactor", "PlayRequest", -- client → server
 } do
 	local r = Instance.new("RemoteEvent")
@@ -1777,6 +2128,9 @@ Combat.hooks.repairReactor = function(player: Player): boolean
 	return true
 end
 Combat.init(remotes)
+ship.armoryPrompt.Triggered:Connect(function(player)
+	R.OpenArmory:FireClient(player)
+end)
 
 PerkSystem.init(remotes)
 PerkSystem.hooks.onChanged = function(player: Player)
@@ -2082,6 +2436,9 @@ local function landOnIo()
 	task.wait(1.2) -- screens are black now
 	if not moon then
 		moon = MoonBuilder.build()
+		moon.armoryPrompt.Triggered:Connect(function(player)
+			R.OpenArmory:FireClient(player)
+		end)
 	end
 	applyStage({ name = "Moon", spawn = moon.spawn, reactor = moon.reactor, reactorRadius = moon.reactorRadius,
 		vents = moon.vents, roomCenters = moon.roomCenters })
@@ -2242,7 +2599,7 @@ while true do
 	end
 end
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX0000000B"><Properties><string name="Name">KeisAI</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000C"><Properties><string name="Name">KeisAI</string><ProtectedString name="Source"><![CDATA[--!strict
 -- The Keis: key-shaped entities with faces that chant "keis keis keis o algo o algo".
 -- They crawl out of the vents and go for the reactor, or for any crew member who gets close.
 
@@ -2602,7 +2959,7 @@ end
 
 return Keis
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX0000000C"><Properties><string name="Name">Loot</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000D"><Properties><string name="Name">Loot</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Keys (dropped by Keis, pulled toward players) and supply crates (opened with keys between waves).
 
 local Debris = game:GetService("Debris")
@@ -2842,7 +3199,7 @@ end
 
 return Loot
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX0000000D"><Properties><string name="Name">Missions</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000E"><Properties><string name="Name">Missions</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Wave missions. Every wave picks one, so no two waves play the same.
 --   Defend   – destroy every Keis (classic)
 --   Boss     – the Master Keis boards (every 5th wave)
@@ -3197,12 +3554,13 @@ end
 
 return Missions
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX0000000E"><Properties><string name="Name">MoonBuilder</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX0000000F"><Properties><string name="Name">MoonBuilder</string><ProtectedString name="Source"><![CDATA[--!strict
 -- IO: Jupiter's volcanic moon. Built with Terrain + parts after the crew survives wave 10.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SpaceArt = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpaceArt"))
+local Props = require(script.Parent:WaitForChild("Props"))
 
 local MoonBuilder = {}
 
@@ -3251,6 +3609,7 @@ export type MoonInfo = {
 	vents: { Vector3 },
 	roomCenters: { Vector3 },
 	space: { Instance },
+	armoryPrompt: ProximityPrompt,
 }
 
 function MoonBuilder.clear()
@@ -3455,6 +3814,9 @@ function MoonBuilder.build(): MoonInfo
 		spot.Parent = head
 	end
 
+	-- armory bench next to the ramp
+	local armoryPrompt = Props.armoryBench(folder, CFrame.new(S + Vector3.new(16, 0, -24)))
+
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
 	spawn.Neutral = true
@@ -3515,12 +3877,13 @@ function MoonBuilder.build(): MoonInfo
 		vents = vents,
 		roomCenters = roomCenters,
 		space = space,
+		armoryPrompt = armoryPrompt,
 	}
 end
 
 return MoonBuilder
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX0000000F"><Properties><string name="Name">PerkSystem</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX00000010"><Properties><string name="Name">PerkSystem</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Server side of the perk cards: offers, picks, rerolls (cost 1 key), stacks per player for the current run.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -3637,7 +4000,7 @@ end
 
 return PerkSystem
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX00000010"><Properties><string name="Name">PlayerData</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX00000011"><Properties><string name="Name">PlayerData</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Permanent progress: level, XP, best wave, total Keis destroyed. Saved with DataStores.
 -- In Studio, enable Game Settings → Security → "Enable Studio Access to API Services" to test saving.
 
@@ -3802,7 +4165,177 @@ end
 
 return PlayerData
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX00000011"><Properties><string name="Name">ShipBuilder</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX00000012"><Properties><string name="Name">Props</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Detailed set pieces. Right now: the Armory bench where players upgrade weapons and change attachments.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local WeaponModel = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("WeaponModel"))
+
+local Props = {}
+
+local DARK = Color3.fromRGB(52, 55, 62)
+local STEEL = Color3.fromRGB(120, 124, 130)
+local ORANGE = Color3.fromRGB(255, 138, 61)
+local HAZARD = Color3.fromRGB(230, 180, 30)
+
+local function part(parent: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?, collide: boolean?): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = collide == true
+	p.CanQuery = collide == true
+	if shape then
+		p.Shape = shape
+	end
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+local function displayWeapon(parent: Instance, weaponId: string, att: any, cf: CFrame)
+	local holder = Instance.new("Model")
+	holder.Name = "Display" .. weaponId
+	holder.Parent = parent
+	local built = WeaponModel.build(weaponId, att, holder, "Root")
+	built.root.Anchored = true
+	built.root.Transparency = 0
+	built.root.CFrame = cf
+	if built.spin then
+		built.spin.Parent = nil -- displays don't spin
+	end
+end
+
+-- cf: floor point at the front-center of the bench; the bench faces -Z (players stand at -Z)
+function Props.armoryBench(parent: Instance, cf: CFrame): ProximityPrompt
+	local m = Instance.new("Model")
+	m.Name = "ArmoryBench"
+	m.Parent = parent
+	local function at(x: number, y: number, z: number): CFrame
+		return cf * CFrame.new(x, y, z)
+	end
+
+	-- floor marking
+	for i = 0, 9 do
+		part(m, Vector3.new(1, 0.05, 0.4), at(-4.5 + i, 0.03, -2.3) * CFrame.Angles(0, math.rad(45), 0), if i % 2 == 0 then HAZARD else Color3.fromRGB(20, 20, 20))
+	end
+	-- table
+	local top = part(m, Vector3.new(9, 0.4, 3.4), at(0, 3.4, 0), DARK, Enum.Material.DiamondPlate, nil, true)
+	top.Name = "BenchTop"
+	part(m, Vector3.new(9.05, 0.12, 0.12), at(0, 3.55, -1.72), ORANGE, Enum.Material.Neon)
+	for _, x in { -4.2, 4.2 } do
+		for _, z in { -1.4, 1.4 } do
+			part(m, Vector3.new(0.4, 3.2, 0.4), at(x, 1.6, z), STEEL, Enum.Material.Metal, nil, true)
+		end
+	end
+	part(m, Vector3.new(8.6, 0.2, 3), at(0, 1, 0), STEEL, Enum.Material.Metal)
+	-- stuff on the shelf
+	part(m, Vector3.new(1.6, 0.9, 1.2), at(-2.8, 1.55, 0.2), Color3.fromRGB(88, 94, 60), Enum.Material.Metal)
+	part(m, Vector3.new(1.2, 0.7, 1), at(-1.2, 1.45, 0.4), Color3.fromRGB(150, 40, 35), Enum.Material.Metal)
+	for i = 0, 3 do
+		part(m, Vector3.new(0.35, 0.6, 0.35), at(1.2 + i * 0.45, 1.4, -0.4), Color3.fromRGB(200, 160, 70), Enum.Material.Metal, Enum.PartType.Cylinder)
+	end
+
+	-- pegboard wall with tools
+	part(m, Vector3.new(9, 6.4, 0.3), at(0, 6.8, 1.75), Color3.fromRGB(70, 74, 80), Enum.Material.Metal, nil, true)
+	for row = 0, 4 do
+		part(m, Vector3.new(8.8, 0.08, 0.05), at(0, 4.4 + row * 1.2, 1.58), Color3.fromRGB(40, 42, 46), Enum.Material.Metal)
+	end
+	-- wrench
+	part(m, Vector3.new(0.2, 1.6, 0.08), at(3.4, 7.6, 1.55) * CFrame.Angles(0, 0, math.rad(10)), STEEL, Enum.Material.Metal)
+	part(m, Vector3.new(0.55, 0.35, 0.08), at(3.27, 8.4, 1.55), STEEL, Enum.Material.Metal)
+	-- screwdrivers
+	for i = 0, 2 do
+		part(m, Vector3.new(0.12, 0.9, 0.12), at(2.3 + i * 0.35, 7.2, 1.55), STEEL, Enum.Material.Metal)
+		part(m, Vector3.new(0.2, 0.45, 0.2), at(2.3 + i * 0.35, 7.8, 1.55), if i == 1 then ORANGE else Color3.fromRGB(40, 90, 180))
+	end
+	-- spare scopes on a shelf
+	part(m, Vector3.new(2.4, 0.12, 0.6), at(-3, 5.4, 1.35), STEEL, Enum.Material.Metal)
+	for i = 0, 1 do
+		part(m, Vector3.new(0.9, 0.3, 0.3), at(-3.6 + i * 1.1, 5.65, 1.35) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(20, 20, 22), Enum.Material.Metal, Enum.PartType.Cylinder)
+	end
+	-- a spare rifle hanging on the wall + one lying on the table
+	displayWeapon(m, "Blaster", { Optic = "ACOG", Laser = "Red", Muzzle = "Compensator" }, at(-0.6, 8.3, 1.4) * CFrame.Angles(0, math.rad(90), 0))
+	displayWeapon(m, "Blaster", { Optic = "RedDot", Laser = "None", Muzzle = "None" }, at(0.4, 4.0, -0.2) * CFrame.Angles(0, math.rad(80), math.rad(90)))
+	-- vise
+	part(m, Vector3.new(0.8, 0.6, 0.8), at(3.7, 3.9, -0.9), Color3.fromRGB(40, 90, 160), Enum.Material.Metal)
+	part(m, Vector3.new(0.9, 0.3, 0.2), at(3.7, 4.3, -1.25), STEEL, Enum.Material.Metal)
+
+	-- monitor
+	part(m, Vector3.new(0.3, 1, 0.3), at(-3, 4.1, 0.7), DARK, Enum.Material.Metal)
+	local screen = part(m, Vector3.new(2.6, 1.6, 0.15), at(-3, 5, 0.65) * CFrame.Angles(math.rad(-8), 0, 0), Color3.fromRGB(10, 14, 18))
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(260, 160)
+	sg.LightInfluence = 0
+	sg.Brightness = 1.6
+	sg.Parent = screen
+	for i, line in { "ARMORY // WEAPON SYSTEMS", "OPTICS ....... READY", "LASER MODULES  READY", "BARREL KITS .. READY", "> PRESS E TO MODIFY" } do
+		local l = Instance.new("TextLabel")
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.fromOffset(10, 6 + (i - 1) * 30)
+		l.Size = UDim2.new(1, -20, 0, 26)
+		l.Font = Enum.Font.Code
+		l.TextSize = 17
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextColor3 = if i == 5 then ORANGE else Color3.fromRGB(110, 255, 160)
+		l.Text = line
+		l.Parent = sg
+	end
+
+	-- desk lamp shining on the table
+	part(m, Vector3.new(0.5, 0.15, 0.5), at(2.2, 3.68, 0.9), DARK, Enum.Material.Metal)
+	part(m, Vector3.new(0.12, 1.8, 0.12), at(2.2, 4.5, 0.9) * CFrame.Angles(math.rad(-20), 0, 0), DARK, Enum.Material.Metal)
+	local lampHead = part(m, Vector3.new(0.7, 0.35, 0.5), at(2.2, 5.35, 0.45) * CFrame.Angles(math.rad(-50), 0, 0), Color3.fromRGB(255, 236, 200), Enum.Material.Neon)
+	local spot = Instance.new("SpotLight")
+	spot.Face = Enum.NormalId.Bottom
+	spot.Range = 10
+	spot.Angle = 80
+	spot.Brightness = 2
+	spot.Shadows = true
+	spot.Color = Color3.fromRGB(255, 236, 200)
+	spot.Parent = lampHead
+
+	-- sign
+	local sign = part(m, Vector3.new(5, 1.2, 0.1), at(0, 10.4, 1.55), Color3.new(0, 0, 0))
+	sign.Transparency = 1
+	local sg2 = Instance.new("SurfaceGui")
+	sg2.Face = Enum.NormalId.Front
+	sg2.CanvasSize = Vector2.new(500, 120)
+	sg2.LightInfluence = 0
+	sg2.Brightness = 2
+	sg2.Parent = sign
+	local t = Instance.new("TextLabel")
+	t.Size = UDim2.fromScale(1, 1)
+	t.BackgroundTransparency = 1
+	t.Font = Enum.Font.GothamBlack
+	t.TextScaled = true
+	t.TextColor3 = ORANGE
+	t.Text = "ARMORY"
+	t.Parent = sg2
+	local signLight = Instance.new("PointLight")
+	signLight.Color = ORANGE
+	signLight.Range = 10
+	signLight.Brightness = 1
+	signLight.Parent = sign
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Open Armory"
+	prompt.ObjectText = "WEAPON BENCH"
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = top
+	return prompt
+end
+
+return Props
+]]></ProtectedString></Properties></Item>
+<Item class="ModuleScript" referent="RBX00000013"><Properties><string name="Name">ShipBuilder</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Builds the ship (USS KEPLER), the space outside it, and Jupiter. Parts only, no assets.
 --
 --   Top view (X →, Z ↓). Jupiter is off to +X/+Z, so the bridge, medbay and observation deck face it.
@@ -3814,6 +4347,8 @@ return PlayerData
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SpaceArt = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpaceArt"))
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Props = require(script.Parent:WaitForChild("Props"))
 local Lighting = game:GetService("Lighting")
 
 local ShipBuilder = {}
@@ -3871,6 +4406,7 @@ local HAZARD_Y = Color3.fromRGB(230, 180, 30)
 local PIPE = Color3.fromRGB(96, 92, 86)
 local GRATE = Color3.fromRGB(24, 25, 28)
 local RIB = Color3.fromRGB(120, 124, 128)
+local STEEL_RING = Color3.fromRGB(150, 154, 160)
 
 local function hazardPost(parent: Instance, size: Vector3, cf: CFrame)
 	-- yellow/black striped post (stacked bands)
@@ -3899,6 +4435,23 @@ local function sectorLabel(parent: Instance, cf: CFrame, code: string)
 	l.TextTransparency = 0.15
 	l.Text = code
 	l.Parent = sg
+end
+
+-- a looping 3D sound if its id is set in Config.Sounds
+local function sound3d(parent: Instance, id: string, volume: number, range: number, speed: number?)
+	if id == "" then
+		return
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Looped = true
+	s.Volume = volume
+	s.PlaybackSpeed = speed or 1
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 4
+	s.RollOffMaxDistance = range
+	s.Parent = parent
+	s:Play()
 end
 
 -- Detail pass ----------------------------------------------------------------------------------------
@@ -4096,6 +4649,7 @@ local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
 			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 1) }),
 			Color = ColorSequence.new(Color3.fromRGB(220, 225, 230)), LightInfluence = 0.8,
 		})
+		sound3d(holder, Config.Sounds.Steam, 0.5, 28, rng:NextNumber(0.9, 1.1))
 	end
 
 	-- a broken, sparking wall panel in some rooms
@@ -4109,6 +4663,7 @@ local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
 			SpreadAngle = Vector2.new(60, 60), Acceleration = Vector3.new(0, -40, 0), LightEmission = 1,
 			Size = NumberSequence.new(0.25, 0), Color = ColorSequence.new(Color3.fromRGB(255, 200, 90)),
 		})
+		sound3d(box, Config.Sounds.Sparks, 0.6, 30)
 		local l = light(box, Color3.fromRGB(255, 170, 80), 12, 1.2)
 		task.spawn(function()
 			while box.Parent do
@@ -4130,6 +4685,224 @@ local function detailRoom(folder: Folder, def: RoomDef, rng: Random)
 				deco(folder, Vector3.new(1.2, 0.12, 0.1), CFrame.new(x, 5.6 + k * 0.4, wallZ + facing * 0.92), Color3.fromRGB(30, 30, 35), Enum.Material.Metal)
 			end
 		end
+	end
+end
+
+-- Greebles: the "stuff sticking out" pass --------------------------------------------------------------
+local COPPER = Color3.fromRGB(170, 100, 60)
+local VALVE_RED = Color3.fromRGB(180, 40, 35)
+
+local function cyl(parent: Instance, len: number, d: number, cf: CFrame, color: Color3, material: Enum.Material?): Part
+	-- cylinder along the CFrame's X axis
+	local p = deco(parent, Vector3.new(len, d, d), cf, color, material or Enum.Material.Metal)
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+
+local function ball(parent: Instance, d: number, pos: Vector3, color: Color3): Part
+	local p = deco(parent, Vector3.one * d, CFrame.new(pos), color, Enum.Material.Metal)
+	p.Shape = Enum.PartType.Ball
+	return p
+end
+
+-- a pipe that sticks out of the wall, bends, and runs to the floor or ceiling, with flanges and a valve wheel
+local function wallPipe(parent: Instance, base: Vector3, inward: Vector3, rng: Random)
+	local color = if rng:NextNumber() < 0.5 then PIPE else COPPER
+	local d = rng:NextNumber(0.6, 0.9)
+	local out = rng:NextNumber(1.4, 2.2)
+	local y = rng:NextNumber(4, 9)
+	local start = base + Vector3.new(0, y, 0)
+	local elbow = start + inward * out
+	cyl(parent, out, d, CFrame.lookAt(start + inward * out / 2, elbow) * CFrame.Angles(0, math.rad(90), 0), color)
+	cyl(parent, 0.25, d + 0.35, CFrame.lookAt(start + inward * 0.15, elbow) * CFrame.Angles(0, math.rad(90), 0), STEEL_RING)
+	ball(parent, d * 1.15, elbow, color)
+	local up = rng:NextNumber() < 0.5
+	local endY = if up then H - 0.5 else 0
+	local runLen = math.abs(endY - y)
+	local mid = elbow + Vector3.new(0, (endY - y) / 2, 0)
+	cyl(parent, runLen, d, CFrame.new(mid) * CFrame.Angles(0, 0, math.rad(90)), color)
+	local k = 2
+	while k < runLen - 0.5 do
+		cyl(parent, 0.25, d + 0.3, CFrame.new(elbow + Vector3.new(0, (if up then 1 else -1) * k, 0)) * CFrame.Angles(0, 0, math.rad(90)), STEEL_RING)
+		k += 3
+	end
+	-- valve wheel on the horizontal stub
+	local vpos = start + inward * (out * 0.5) + Vector3.new(0, d / 2 + 0.45, 0)
+	cyl(parent, 0.4, 0.15, CFrame.new(vpos - Vector3.new(0, 0.25, 0)) * CFrame.Angles(0, 0, math.rad(90)), STEEL_RING)
+	for i = 0, 7 do
+		local a = i / 8 * math.pi * 2
+		deco(parent, Vector3.new(0.38, 0.1, 0.12), CFrame.new(vpos + Vector3.new(math.cos(a) * 0.45, 0, math.sin(a) * 0.45)) * CFrame.Angles(0, -a + math.pi / 2, 0),
+			VALVE_RED, Enum.Material.Metal)
+	end
+	for i = 0, 1 do
+		local a = i * math.pi / 2
+		deco(parent, Vector3.new(0.9, 0.06, 0.08), CFrame.new(vpos) * CFrame.Angles(0, a, 0), VALVE_RED, Enum.Material.Metal)
+	end
+end
+
+local function junctionBox(parent: Instance, base: Vector3, inward: Vector3, rng: Random)
+	local pos = base + Vector3.new(0, 5.5, 0) + inward * 0.45
+	local face = CFrame.lookAt(pos, pos + inward)
+	part(parent, Vector3.new(2.2, 2.8, 0.9), face, Color3.fromRGB(90, 96, 104), Enum.Material.Metal)
+	deco(parent, Vector3.new(1.9, 2.5, 0.08), face * CFrame.new(0, 0, -0.48), Color3.fromRGB(110, 116, 124), Enum.Material.Metal)
+	deco(parent, Vector3.new(0.12, 0.5, 0.1), face * CFrame.new(0.75, 0, -0.55), Color3.fromRGB(30, 30, 30), Enum.Material.Metal)
+	deco(parent, Vector3.new(0.9, 0.5, 0.02), face * CFrame.new(-0.3, 0.8, -0.53), HAZARD_Y, Enum.Material.SmoothPlastic)
+	for i = 0, 2 do
+		local led = deco(parent, Vector3.new(0.14, 0.14, 0.06), face * CFrame.new(-0.6 + i * 0.3, -0.9, -0.54),
+			if i == 0 then Color3.fromRGB(80, 255, 120) elseif i == 1 then Color3.fromRGB(255, 190, 40) else Color3.fromRGB(255, 50, 40), Enum.Material.Neon)
+		led:SetAttribute("BlinkRate", rng:NextNumber(0.3, 2))
+		CollectionService:AddTag(led, "BlinkLED")
+	end
+	-- conduit up to the ceiling
+	local top = pos + Vector3.new(0, 1.4, 0)
+	cyl(parent, H - top.Y, 0.35, CFrame.new(top + Vector3.new(0, (H - top.Y) / 2, 0)) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(40, 42, 46))
+end
+
+local function gauges(parent: Instance, base: Vector3, inward: Vector3, rng: Random)
+	local pos = base + Vector3.new(0, 6, 0) + inward * 0.9
+	local along = inward:Cross(Vector3.yAxis)
+	cyl(parent, 3.2, 0.5, CFrame.lookAt(pos, pos + along) * CFrame.Angles(0, math.rad(90), 0), PIPE)
+	for i = -1, 1 do
+		local gp = pos + along * i * 1.1 + Vector3.new(0, 0.75, 0)
+		cyl(parent, 0.5, 0.25, CFrame.new(gp - Vector3.new(0, 0.4, 0)) * CFrame.Angles(0, 0, math.rad(90)), STEEL_RING)
+		local dial = cyl(parent, 0.2, 0.9, CFrame.lookAt(gp, gp + inward) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(40, 40, 44))
+		local face = deco(parent, Vector3.new(0.75, 0.75, 0.02), CFrame.lookAt(gp + inward * 0.11, gp + inward * 2), Color3.new(1, 1, 1))
+		face.Transparency = 1
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = Enum.NormalId.Front
+		sg.CanvasSize = Vector2.new(100, 100)
+		sg.LightInfluence = 0.6
+		sg.Parent = face
+		local bg = Instance.new("Frame")
+		bg.Size = UDim2.fromScale(1, 1)
+		bg.BackgroundColor3 = Color3.fromRGB(235, 232, 220)
+		bg.Parent = sg
+		Instance.new("UICorner", bg).CornerRadius = UDim.new(0.5, 0)
+		local red = Instance.new("Frame")
+		red.AnchorPoint = Vector2.new(0.5, 0.5)
+		red.Position = UDim2.fromScale(0.78, 0.3)
+		red.Size = UDim2.fromScale(0.18, 0.18)
+		red.BackgroundColor3 = Color3.fromRGB(220, 50, 40)
+		red.Parent = bg
+		Instance.new("UICorner", red).CornerRadius = UDim.new(0.5, 0)
+		local needle = Instance.new("Frame")
+		needle.Name = "Needle"
+		needle.AnchorPoint = Vector2.new(0.5, 1)
+		needle.Position = UDim2.fromScale(0.5, 0.5)
+		needle.Size = UDim2.fromScale(0.05, 0.42)
+		needle.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		needle.BorderSizePixel = 0
+		needle.Rotation = rng:NextNumber(-60, 60)
+		needle.Parent = bg
+		CollectionService:AddTag(face, "Gauge")
+		local _ = dial
+	end
+end
+
+local function wallFan(parent: Instance, base: Vector3, inward: Vector3)
+	local pos = base + Vector3.new(0, 11.5, 0) + inward * 0.6
+	local face = CFrame.lookAt(pos, pos + inward)
+	for _, o in { { 0, 1.5, 3.4, 0.3 }, { 0, -1.5, 3.4, 0.3 }, { 1.55, 0, 0.3, 3.4 }, { -1.55, 0, 0.3, 3.4 } } do
+		deco(parent, Vector3.new(o[3], o[4], 0.5), face * CFrame.new(o[1], o[2], 0), STEEL_RING, Enum.Material.Metal)
+	end
+	deco(parent, Vector3.new(3, 3, 0.1), face * CFrame.new(0, 0, 0.2), Color3.fromRGB(15, 15, 18), Enum.Material.SmoothPlastic)
+	local fan = Instance.new("Model")
+	fan.Name = "Fan"
+	fan.Parent = parent
+	local hub = cyl(fan, 0.3, 0.6, face * CFrame.new(0, 0, -0.05) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(60, 62, 68))
+	fan.PrimaryPart = hub
+	for i = 0, 3 do
+		deco(fan, Vector3.new(0.5, 1.3, 0.06), face * CFrame.Angles(0, 0, i * math.pi / 2) * CFrame.new(0, 0.75, -0.05) * CFrame.Angles(0, math.rad(20), 0),
+			Color3.fromRGB(80, 84, 90), Enum.Material.Metal)
+	end
+	CollectionService:AddTag(fan, "Fan")
+	-- grille bars in front
+	for i = -2, 2 do
+		deco(parent, Vector3.new(0.06, 3, 0.06), face * CFrame.new(i * 0.6, 0, -0.3), STEEL_RING, Enum.Material.Metal)
+	end
+end
+
+-- a bundle of wires sagging across the ceiling
+local function sagWire(parent: Instance, a: Vector3, b: Vector3, sag: number, color: Color3, thickness: number)
+	local segs = 8
+	local prev = a
+	for i = 1, segs do
+		local t = i / segs
+		local p = a:Lerp(b, t) - Vector3.new(0, sag * 4 * t * (1 - t), 0)
+		local len = (p - prev).Magnitude
+		cyl(parent, len + 0.05, thickness, CFrame.lookAt((prev + p) / 2, p) * CFrame.Angles(0, math.rad(90), 0), color, Enum.Material.SmoothPlastic)
+		prev = p
+	end
+end
+
+local function greebleRoom(folder: Folder, def: RoomDef, rng: Random)
+	local c, sx, sz = def.center, def.size.X, def.size.Y
+	local alongX = sx >= sz
+	local long, short = math.max(sx, sz), math.min(sx, sz)
+	local placed = 0
+	for _, side in { "N", "S", "E", "W" } do
+		local sideAlongX = side == "N" or side == "S"
+		local length = if sideAlongX then sx else sz
+		local spots = freeSpots(def, side, length, 4)
+		local inward = if side == "N" then Vector3.new(0, 0, 1) elseif side == "S" then Vector3.new(0, 0, -1)
+			elseif side == "E" then Vector3.new(-1, 0, 0) else Vector3.new(1, 0, 0)
+		local fixed = if side == "N" then c.Z - sz / 2 + 1 elseif side == "S" then c.Z + sz / 2 - 1 elseif side == "E" then c.X + sx / 2 - 1 else c.X - sx / 2 + 1
+		local used: { number } = {}
+		for _ = 1, 3 do
+			if #spots == 0 or placed >= 7 then
+				break
+			end
+			local t = spots[rng:NextInteger(1, #spots)]
+			local clash = false
+			for _, u in used do
+				if math.abs(u - t) < 4 then
+					clash = true
+				end
+			end
+			if not clash then
+				table.insert(used, t)
+				placed += 1
+				local base = if sideAlongX then Vector3.new(c.X + t, c.Y, fixed) else Vector3.new(fixed, c.Y, c.Z + t)
+				local roll = rng:NextNumber()
+				if roll < 0.4 then
+					wallPipe(folder, base, inward, rng)
+				elseif roll < 0.65 then
+					junctionBox(folder, base, inward, rng)
+				elseif roll < 0.85 then
+					gauges(folder, base, inward, rng)
+				else
+					wallFan(folder, base, inward)
+				end
+			end
+		end
+	end
+
+	-- wires sagging across the ceiling (short axis)
+	for i = 1, 2 do
+		local t = rng:NextNumber(-long / 2 + 3, long / 2 - 3)
+		local a = if alongX then c + Vector3.new(t, H - 1.2, -short / 2 + 1.5) else c + Vector3.new(-short / 2 + 1.5, H - 1.2, t)
+		local b = if alongX then c + Vector3.new(t + rng:NextNumber(-3, 3), H - 1.2, short / 2 - 1.5) else c + Vector3.new(short / 2 - 1.5, H - 1.2, t + rng:NextNumber(-3, 3))
+		local colors = { Color3.fromRGB(20, 20, 22), Color3.fromRGB(160, 40, 35), Color3.fromRGB(220, 180, 40), Color3.fromRGB(40, 80, 160) }
+		for k = 0, 2 do
+			sagWire(folder, a + Vector3.new(0, -k * 0.2, k * 0.15), b + Vector3.new(0, -k * 0.2, k * 0.15), rng:NextNumber(1.2, 2.8) + k * 0.2,
+				colors[((i + k) % #colors) + 1], 0.16)
+		end
+	end
+
+	-- floor conduit along one long wall + cable tray along the ceiling
+	local side = if rng:NextNumber() < 0.5 then 1 else -1
+	local conduitPos = if alongX then c + Vector3.new(0, 0.35, side * (short / 2 - 1.5)) else c + Vector3.new(side * (short / 2 - 1.5), 0.35, 0)
+	local csize = if alongX then Vector3.new(long - 6, 0.7, 0.8) else Vector3.new(0.8, 0.7, long - 6)
+	deco(folder, csize, CFrame.new(conduitPos), Color3.fromRGB(60, 64, 70), Enum.Material.Metal)
+	local trayPos = if alongX then c + Vector3.new(0, H - 2.6, -side * (short / 2 - 3)) else c + Vector3.new(-side * (short / 2 - 3), H - 2.6, 0)
+	local tsize = if alongX then Vector3.new(long - 4, 0.15, 1.6) else Vector3.new(1.6, 0.15, long - 4)
+	deco(folder, tsize, CFrame.new(trayPos), Color3.fromRGB(90, 94, 100), Enum.Material.DiamondPlate)
+	for k = 0, 3 do
+		local off = Vector3.new(0, 0.15, -0.5 + k * 0.33)
+		local cable = deco(folder, if alongX then Vector3.new(long - 4.5, 0.22, 0.22) else Vector3.new(0.22, 0.22, long - 4.5),
+			CFrame.new(trayPos + (if alongX then off else Vector3.new(off.Z, off.Y, 0))),
+			if k % 2 == 0 then Color3.fromRGB(25, 25, 28) else Color3.fromRGB(150, 40, 35), Enum.Material.SmoothPlastic)
+		local _ = cable
 	end
 end
 
@@ -4317,6 +5090,7 @@ export type ShipInfo = {
 	roomCenters: { Vector3 },
 	leaderboard: Frame,
 	space: { Instance },
+	armoryPrompt: ProximityPrompt,
 }
 
 function ShipBuilder.build(): ShipInfo
@@ -4387,6 +5161,7 @@ function ShipBuilder.build(): ShipInfo
 	for _, def in rooms do
 		folders[def.name] = buildRoom(ship, def)
 		detailRoom(folders[def.name], def, detailRng)
+		greebleRoom(folders[def.name], def, detailRng)
 		table.insert(roomCenters, def.center)
 	end
 
@@ -4397,6 +5172,7 @@ function ShipBuilder.build(): ShipInfo
 	local core = part(rf, Vector3.new(12, 6, 6), CFrame.new(0, 9, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(90, 220, 255), Enum.Material.Neon, "ReactorCore")
 	core.Shape = Enum.PartType.Cylinder
 	light(core, Color3.fromRGB(90, 220, 255), 40, 2.5)
+	sound3d(core, Config.Sounds.ReactorHum, 0.8, 60)
 	for k, y in { 5, 9, 13 } do
 		local ring = deco(rf, Vector3.new(0.8, 10 + k, 10 + k), CFrame.new(0, y, 0) * CFrame.Angles(0, 0, math.rad(90)), HULL, Enum.Material.Metal)
 		ring.Shape = Enum.PartType.Cylinder
@@ -4426,6 +5202,8 @@ function ShipBuilder.build(): ShipInfo
 	boardFrame.Size = UDim2.fromScale(1, 1)
 	boardFrame.BackgroundColor3 = Color3.fromRGB(14, 11, 18)
 	boardFrame.Parent = sg
+
+	local armoryPrompt = Props.armoryBench(bf, CFrame.new(79, 0, 12.5))
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
@@ -4458,6 +5236,7 @@ function ShipBuilder.build(): ShipInfo
 		eng.Shape = Enum.PartType.Cylinder
 		local glowRing = deco(ef, Vector3.new(1, 7.6, 7.6), CFrame.new(x, 10, -52) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(255, 120, 50), Enum.Material.Neon)
 		glowRing.Shape = Enum.PartType.Cylinder
+		sound3d(eng, Config.Sounds.EngineRumble, 0.9, 50)
 	end
 	local of = folders["Observation Deck"]
 	for _, x in { -10, 0, 10 } do
@@ -4516,12 +5295,13 @@ function ShipBuilder.build(): ShipInfo
 		roomCenters = roomCenters,
 		leaderboard = boardFrame,
 		space = space,
+		armoryPrompt = armoryPrompt,
 	}
 end
 
 return ShipBuilder
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX00000012"><Properties><string name="Name">Suit</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX00000014"><Properties><string name="Name">Suit</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Dresses every crew member in a white spacesuit: suit colors, glass helmet, life-support pack, mission patch.
 -- Turn off with Config.SPACESUITS = false.
 
@@ -4606,7 +5386,328 @@ return Suit
 ]]></ProtectedString></Properties></Item>
 </Item>
 </Item>
-<Item class="StarterPlayer" referent="RBX00000021"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX00000020"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX0000001F"><Properties><string name="Name">Client</string></Properties><Item class="LocalScript" referent="RBX00000015"><Properties><string name="Name">Atmosphere</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="StarterPlayer" referent="RBX00000024"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX00000023"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX00000022"><Properties><string name="Name">Client</string></Properties><Item class="LocalScript" referent="RBX00000017"><Properties><string name="Name">Armory</string><ProtectedString name="Source"><![CDATA[--!strict
+-- The Armory: opened at the weapon bench. Attachments (with live 3D preview), upgrades, supplies.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Theme = require(script.Parent:WaitForChild("Theme"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local WeaponModel = require(Shared:WaitForChild("WeaponModel"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local C, F = Theme.Colors, Theme.Fonts
+local make, text = Theme.make, Theme.text
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local Attachment = Remotes:WaitForChild("Attachment") :: RemoteEvent
+local Buy = Remotes:WaitForChild("BuyUpgrade") :: RemoteEvent
+local Repair = Remotes:WaitForChild("RepairReactor") :: RemoteEvent
+
+local gui = make("ScreenGui", { Name = "Armory", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 15, Enabled = false,
+	Parent = player:WaitForChild("PlayerGui") })
+local scale = make("UIScale", { Parent = gui })
+RunService.RenderStepped:Connect(function()
+	scale.Scale = math.clamp(camera.ViewportSize.Y / 900, 0.55, 1.1)
+end)
+-- a Modal button frees the mouse while in first person
+make("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.5, Text = "",
+	AutoButtonColor = false, Modal = true, Parent = gui })
+
+local panel = Theme.panel({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(1060, 640), Parent = gui })
+text({ Font = F.Title, TextSize = 26, Position = UDim2.fromOffset(26, 18), Size = UDim2.fromOffset(500, 32), Text = "ARMORY", Parent = panel })
+text({ Font = F.Mono, TextSize = 14, TextColor3 = C.Muted, Position = UDim2.fromOffset(26, 50), Size = UDim2.fromOffset(500, 18),
+	Text = "USS KEPLER · WEAPON SYSTEMS · 07/14/2011", Parent = panel })
+local creditsText = text({ Font = F.Heavy, TextSize = 24, TextColor3 = C.Gold, TextXAlignment = Enum.TextXAlignment.Right, AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -70, 0, 20), Size = UDim2.fromOffset(260, 30), Parent = panel })
+local closeBtn = make("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 18), Size = UDim2.fromOffset(36, 36),
+	BackgroundColor3 = C.Bg, Text = "✕", Font = F.Heavy, TextSize = 18, TextColor3 = C.Text, Parent = panel }, { Theme.corner(8) })
+
+-- Preview (left) ---------------------------------------------------------------------------------------
+local previewBox = make("Frame", { Position = UDim2.fromOffset(26, 84), Size = UDim2.fromOffset(400, 530), BackgroundColor3 = C.Bg, BackgroundTransparency = 0.1,
+	Parent = panel }, { Theme.corner(10), Theme.stroke(C.Accent, 0.7, 1) })
+local viewport = make("ViewportFrame", { Position = UDim2.fromOffset(0, 10), Size = UDim2.new(1, 0, 0, 330), BackgroundTransparency = 1,
+	Ambient = Color3.fromRGB(150, 150, 160), LightColor = Color3.fromRGB(255, 245, 230), LightDirection = Vector3.new(-1, -1, -0.6), Parent = previewBox })
+local vpCam = Instance.new("Camera")
+vpCam.FieldOfView = 30
+vpCam.Parent = viewport
+viewport.CurrentCamera = vpCam
+local weaponName = text({ Font = F.Title, TextSize = 20, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(0, 346),
+	Size = UDim2.new(1, 0, 0, 26), Parent = previewBox })
+local statsText = text({ Font = F.Mono, TextSize = 15, TextColor3 = C.Cream, Position = UDim2.fromOffset(24, 384), Size = UDim2.new(1, -48, 0, 130),
+	TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true, Parent = previewBox })
+
+local previewModel: Model? = nil
+local previewKey = ""
+local hoverAtt: { slot: string, id: string }? = nil
+
+local function currentAtt(): WeaponModel.Attachments
+	local att = WeaponModel.decode(player:GetAttribute("Attachments") :: string?)
+	if hoverAtt then
+		(att :: any)[hoverAtt.slot] = hoverAtt.id
+	end
+	return att
+end
+
+local function refreshPreview()
+	local weaponId = (player:GetAttribute("Weapon") :: string?) or "Blaster"
+	local att = currentAtt()
+	local key = weaponId .. WeaponModel.encode(att)
+	if key == previewKey then
+		return
+	end
+	previewKey = key
+	if previewModel then
+		previewModel:Destroy()
+	end
+	local m = Instance.new("Model")
+	WeaponModel.build(weaponId, att, m, "Root")
+	m.Parent = viewport
+	previewModel = m
+	local w = Config.Weapons[weaponId]
+	weaponName.Text = if w then w.name else weaponId
+	local optic = Config.attachment("Optic", att.Optic)
+	local laser = Config.attachment("Laser", att.Laser)
+	local muzzle = Config.attachment("Muzzle", att.Muzzle)
+	statsText.Text = string.format("FIRE RATE   %.1f /s\nMAGAZINE    %d\nOPTIC       %s (%.1fx)\nLASER       %s\nMUZZLE      %s",
+		1 / ((player:GetAttribute("FireInterval") :: number?) or 0.2), (player:GetAttribute("MagSize") :: number?) or 0,
+		if optic then optic.name else "-", if optic then optic.zoom else 1, if laser then laser.name else "-", if muzzle then muzzle.name else "-")
+end
+
+-- Tabs (right) ---------------------------------------------------------------------------------------------
+local content = make("Frame", { Position = UDim2.fromOffset(450, 136), Size = UDim2.fromOffset(584, 478), BackgroundTransparency = 1, Parent = panel })
+local tabs: { [string]: Frame } = {}
+local tabButtons: { [string]: TextButton } = {}
+local function showTab(name: string)
+	for n, f in tabs do
+		f.Visible = n == name
+		tabButtons[n].BackgroundColor3 = if n == name then C.Accent else C.Bg
+		tabButtons[n].TextColor3 = if n == name then C.Bg else C.Text
+	end
+	Theme.playSound(Config.Sounds.UIClick, 0.4)
+end
+for i, name in { "ATTACHMENTS", "UPGRADES", "SUPPLIES" } do
+	local b = make("TextButton", { Position = UDim2.fromOffset(450 + (i - 1) * 196, 84), Size = UDim2.fromOffset(186, 38), BackgroundColor3 = C.Bg,
+		Text = name, Font = F.Title, TextSize = 13, TextColor3 = C.Text, Parent = panel }, { Theme.corner(8), Theme.stroke(C.Accent, 0.5, 1) })
+	tabButtons[name] = b
+	tabs[name] = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, Parent = content })
+	b.MouseButton1Click:Connect(function()
+		showTab(name)
+	end)
+end
+
+local function owned(): { [string]: boolean }
+	local set = {}
+	for k in string.gmatch((player:GetAttribute("OwnedAttachments") :: string?) or "", "[^,]+") do
+		set[k] = true
+	end
+	return set
+end
+
+-- ATTACHMENTS
+type Option = { button: TextButton, slot: string, def: any, status: TextLabel }
+local options: { Option } = {}
+do
+	local y = 0
+	for _, slot in { "Optic", "Laser", "Muzzle" } do
+		text({ Font = F.Title, TextSize = 13, TextColor3 = C.Accent, Position = UDim2.fromOffset(0, y), Size = UDim2.fromOffset(300, 18),
+			Text = string.upper(slot), Parent = tabs.ATTACHMENTS })
+		local row = make("Frame", { Position = UDim2.fromOffset(0, y + 22), Size = UDim2.new(1, 0, 0, 112), BackgroundTransparency = 1, Parent = tabs.ATTACHMENTS })
+		make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), Parent = row })
+		local defs = (Config.Attachments :: any)[slot]
+		local w = math.floor((584 - 8 * (#defs - 1)) / #defs)
+		for _, def in defs do
+			local b = make("TextButton", { Size = UDim2.fromOffset(w, 112), BackgroundColor3 = C.Bg, BackgroundTransparency = 0.1, Text = "", AutoButtonColor = false,
+				Parent = row }, { Theme.corner(8), Theme.stroke(C.Muted, 0.6, 1) })
+			text({ Font = F.Title, TextSize = 11, Position = UDim2.fromOffset(8, 10), Size = UDim2.new(1, -16, 0, 28), TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Center, Text = def.name, Parent = b })
+			text({ Font = F.Body, TextSize = 11, TextColor3 = C.Muted, Position = UDim2.fromOffset(6, 40), Size = UDim2.new(1, -12, 0, 36), TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Top, Text = def.desc or "", Parent = b })
+			local status = text({ Font = F.Heavy, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.new(0, 0, 1, -28),
+				Size = UDim2.new(1, 0, 0, 20), Parent = b })
+			b.MouseEnter:Connect(function()
+				hoverAtt = { slot = slot, id = def.id }
+				refreshPreview()
+			end)
+			b.MouseLeave:Connect(function()
+				if hoverAtt and hoverAtt.id == def.id then
+					hoverAtt = nil
+					refreshPreview()
+				end
+			end)
+			b.MouseButton1Click:Connect(function()
+				Attachment:FireServer(slot, def.id)
+				Theme.playSound(Config.Sounds.UIClick, 0.5)
+			end)
+			table.insert(options, { button = b, slot = slot, def = def, status = status })
+		end
+		y += 150
+	end
+end
+
+-- UPGRADES
+type Card = { def: any, level: TextLabel, pips: { Frame }, buy: TextButton }
+local cards: { Card } = {}
+do
+	local grid = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = tabs.UPGRADES })
+	make("UIGridLayout", { CellSize = UDim2.fromOffset(186, 150), CellPadding = UDim2.fromOffset(13, 13), SortOrder = Enum.SortOrder.LayoutOrder, Parent = grid })
+	for i, def in Config.Upgrades do
+		local cell = make("Frame", { BackgroundColor3 = C.Bg, BackgroundTransparency = 0.1, LayoutOrder = i, Parent = grid },
+			{ Theme.corner(10), Theme.stroke(C.Accent, 0.75, 1) })
+		text({ Font = F.Heavy, TextSize = 24, TextColor3 = C.Accent, Position = UDim2.fromOffset(12, 8), Size = UDim2.fromOffset(30, 30), Text = def.icon, Parent = cell })
+		text({ Font = F.Title, TextSize = 11, Position = UDim2.fromOffset(44, 10), Size = UDim2.new(1, -52, 0, 16), Text = def.name, Parent = cell })
+		text({ Font = F.Body, TextSize = 12, TextColor3 = C.Muted, Position = UDim2.fromOffset(44, 28), Size = UDim2.new(1, -52, 0, 16), Text = def.desc, Parent = cell })
+		local pipRow = make("Frame", { Position = UDim2.fromOffset(12, 56), Size = UDim2.new(1, -24, 0, 8), BackgroundTransparency = 1, Parent = cell })
+		make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), Parent = pipRow })
+		local pips = {}
+		for _ = 1, def.max do
+			table.insert(pips, make("Frame", { Size = UDim2.new(1 / def.max, -4, 1, 0), BackgroundColor3 = Color3.fromRGB(50, 42, 56), BorderSizePixel = 0, Parent = pipRow }, { Theme.corner(3) }))
+		end
+		local level = text({ Font = F.Bold, TextSize = 12, TextColor3 = C.Cream, Position = UDim2.fromOffset(12, 70), Size = UDim2.new(1, -24, 0, 16), Parent = cell })
+		local buy = make("TextButton", { Position = UDim2.new(0, 12, 1, -44), Size = UDim2.new(1, -24, 0, 34), BackgroundColor3 = C.Accent, Font = F.Heavy,
+			TextSize = 14, TextColor3 = C.Bg, Text = "", Parent = cell }, { Theme.corner(8) })
+		buy.MouseButton1Click:Connect(function()
+			Buy:FireServer(def.id)
+		end)
+		table.insert(cards, { def = def, level = level, pips = pips, buy = buy })
+	end
+end
+
+-- SUPPLIES
+local MINIGUN = Config.Weapons.Minigun
+local minigunBtn = make("TextButton", { Size = UDim2.new(1, 0, 0, 70), BackgroundColor3 = C.Gold, Font = F.Title, TextSize = 15, TextColor3 = C.Bg,
+	Text = "", Parent = tabs.SUPPLIES }, { Theme.corner(10) })
+minigunBtn.MouseButton1Click:Connect(function()
+	Buy:FireServer("Minigun")
+end)
+minigunBtn.MouseEnter:Connect(function()
+	if player:GetAttribute("Weapon") ~= "Minigun" then
+		previewKey = ""
+		local m = Instance.new("Model")
+		WeaponModel.build("Minigun", currentAtt(), m, "Root")
+		if previewModel then
+			previewModel:Destroy()
+		end
+		m.Parent = viewport
+		previewModel = m
+		weaponName.Text = MINIGUN.name
+	end
+end)
+minigunBtn.MouseLeave:Connect(function()
+	previewKey = ""
+	refreshPreview()
+end)
+local repairBtn = make("TextButton", { Position = UDim2.fromOffset(0, 86), Size = UDim2.new(1, 0, 0, 70), BackgroundColor3 = C.Cyan, Font = F.Title, TextSize = 15,
+	TextColor3 = C.Bg, Text = `REPAIR REACTOR  +{Config.REPAIR_AMOUNT} HP  ·  ◆ {Config.REPAIR_COST}`, Parent = tabs.SUPPLIES }, { Theme.corner(10) })
+repairBtn.MouseButton1Click:Connect(function()
+	Repair:FireServer()
+end)
+
+-- Refresh --------------------------------------------------------------------------------------------------
+local GREY = Color3.fromRGB(60, 52, 66)
+local function refresh()
+	local money = (player:GetAttribute("Credits") :: number?) or 0
+	creditsText.Text = `◆ {money}`
+	local att = WeaponModel.decode(player:GetAttribute("Attachments") :: string?)
+	local have = owned()
+	for _, o in options do
+		local equipped = (att :: any)[o.slot] == o.def.id
+		local isOwned = o.def.price == 0 or have[o.slot .. "." .. o.def.id]
+		local stroke = o.button:FindFirstChildOfClass("UIStroke")
+		if equipped then
+			o.status.Text, o.status.TextColor3 = "EQUIPPED", C.Good
+		elseif isOwned then
+			o.status.Text, o.status.TextColor3 = "EQUIP", C.Text
+		else
+			o.status.Text = `◆ {o.def.price}`
+			o.status.TextColor3 = if money >= o.def.price then C.Gold else C.Muted
+		end
+		if stroke then
+			stroke.Color = if equipped then C.Good else C.Muted
+			stroke.Transparency = if equipped then 0 else 0.6
+		end
+	end
+	for _, card in cards do
+		local lvl = (player:GetAttribute("Up_" .. card.def.id) :: number?) or 0
+		for i, pip in card.pips do
+			pip.BackgroundColor3 = if i <= lvl then C.Accent else GREY
+		end
+		card.level.Text = `LEVEL {lvl} / {card.def.max}`
+		if lvl >= card.def.max then
+			card.buy.Text, card.buy.BackgroundColor3, card.buy.TextColor3 = "MAXED", GREY, C.Muted
+		else
+			local cost = Config.upgradeCost(card.def, lvl)
+			local afford = money >= cost
+			card.buy.Text = `BUY  ◆ {cost}`
+			card.buy.BackgroundColor3 = if afford then C.Accent else GREY
+			card.buy.TextColor3 = if afford then C.Bg else C.Muted
+		end
+	end
+	if player:GetAttribute("Weapon") == "Minigun" then
+		minigunBtn.Text, minigunBtn.BackgroundColor3, minigunBtn.TextColor3 = `{MINIGUN.name}  ·  EQUIPPED`, GREY, C.Muted
+	else
+		local afford = money >= MINIGUN.cost
+		minigunBtn.Text = `UNLOCK {MINIGUN.name}  ·  ◆ {MINIGUN.cost}`
+		minigunBtn.BackgroundColor3 = if afford then C.Gold else GREY
+		minigunBtn.TextColor3 = if afford then C.Bg else C.Muted
+	end
+	local hp = (ReplicatedStorage:GetAttribute("ReactorHP") :: number?) or 0
+	local max = (ReplicatedStorage:GetAttribute("ReactorMax") :: number?) or 1
+	local canRepair = money >= Config.REPAIR_COST and hp < max
+	repairBtn.BackgroundColor3 = if canRepair then C.Cyan else GREY
+	repairBtn.TextColor3 = if canRepair then C.Bg else C.Muted
+	previewKey = ""
+	refreshPreview()
+end
+player.AttributeChanged:Connect(function()
+	if gui.Enabled then
+		refresh()
+	end
+end)
+
+-- Open / close ----------------------------------------------------------------------------------------------
+local openedAt: Vector3? = nil
+local function setOpen(open: boolean)
+	gui.Enabled = open
+	player:SetAttribute("UIOpen", open)
+	if open then
+		local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		openedAt = if hrp then hrp.Position else nil
+		hoverAtt = nil
+		refresh()
+		showTab("ATTACHMENTS")
+		panel.Size = UDim2.fromOffset(1000, 600)
+		Theme.tween(panel, 0.2, { Size = UDim2.fromOffset(1060, 640) }, Enum.EasingStyle.Back)
+	end
+end
+Remotes:WaitForChild("OpenArmory").OnClientEvent:Connect(function()
+	setOpen(true)
+end)
+closeBtn.MouseButton1Click:Connect(function()
+	setOpen(false)
+end)
+Remotes:WaitForChild("Purchased").OnClientEvent:Connect(function()
+	Theme.playSound(Config.Sounds.Buy, 0.6)
+end)
+
+RunService.RenderStepped:Connect(function()
+	if not gui.Enabled then
+		return
+	end
+	-- orbit the preview camera around the weapon
+	local t = os.clock() * 0.6
+	vpCam.CFrame = CFrame.lookAt(Vector3.new(math.sin(t) * 9, 1.6, math.cos(t) * 9) + Vector3.new(0, 0, -0.6), Vector3.new(0, 0.2, -0.6))
+	-- walking away closes it
+	local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if openedAt and hrp and (hrp.Position - openedAt).Magnitude > 14 then
+		setOpen(false)
+	end
+end)
+]]></ProtectedString></Properties></Item>
+<Item class="LocalScript" referent="RBX00000018"><Properties><string name="Name">Atmosphere</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Semi-horror mood: light 2011 camcorder overlay, color grade, alarm pulse, power-outage dark, static when a Keis is close.
 
 local Lighting = game:GetService("Lighting")
@@ -4767,7 +5868,7 @@ RunService.RenderStepped:Connect(function(dt)
 	cc.TintColor = if powerOut then Color3.fromRGB(200, 215, 255) else Color3.fromRGB(236, 246 - math.floor(danger * 60), 240 - math.floor(danger * 80))
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX00000016"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX00000019"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Shooting feel: hold-to-fire, crosshair, tracers, hitmarkers, floating damage numbers, kill pops, combo counter, ammo.
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -4850,6 +5951,12 @@ local function tracerColor(who: Player): Color3
 end
 
 local function muzzlePos(): Vector3?
+	-- first person: the viewmodel's muzzle (what you actually see), else the tool's
+	local vmModel = camera:FindFirstChild("Viewmodel")
+	local vmMuzzle = vmModel and vmModel:FindFirstChild("Muzzle") :: BasePart?
+	if vmMuzzle then
+		return vmMuzzle.Position
+	end
 	local tool = equippedBlaster()
 	local muzzle = tool and tool:FindFirstChild("Muzzle") :: BasePart?
 	return if muzzle then muzzle.Position else nil
@@ -4879,12 +5986,12 @@ end
 
 -- where the shot goes: through the screen center in shoulder mode, else the mouse
 local function aimPoint(): Vector3
-	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+	if true then -- first person: always shoot through the screen center
 		local vp = camera.ViewportSize
 		local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Exclude
-		params.FilterDescendantsInstances = { player.Character :: Instance, tracerFolder }
+		params.FilterDescendantsInstances = { player.Character :: Instance, tracerFolder, camera }
 		local hit = workspace:Raycast(ray.Origin, ray.Direction * 400, params)
 		return if hit then hit.Position else ray.Origin + ray.Direction * 400
 	end
@@ -4925,7 +6032,8 @@ local function tryFire()
 		muzzleFlash(from, tracerColor(player))
 	end
 	local minigun = player:GetAttribute("Weapon") == "Minigun"
-	Theme.playSound(Config.Sounds.Shoot, if minigun then 0.25 else 0.35, (if minigun then 1.15 else 0.95) + math.random() * 0.1)
+	player:SetAttribute("LastShot", os.clock()) -- Viewmodel.client plays the recoil
+	Theme.playSound(if minigun then Config.Sounds.MinigunShoot else Config.Sounds.Shoot, if minigun then 0.35 else 0.5, 0.95 + math.random() * 0.1)
 	-- recoil (small, constant buzz for the minigun; a kick for the blaster)
 	local kick = if minigun then 0.18 else 0.55
 	camera.CFrame *= CFrame.Angles(math.rad(kick), math.rad((math.random() - 0.5) * kick * 0.6), 0)
@@ -4968,6 +6076,11 @@ if player.Character then
 	hookCharacter(player.Character)
 end
 player.CharacterAdded:Connect(hookCharacter)
+player:GetAttributeChangedSignal("Reloading"):Connect(function()
+	if player:GetAttribute("Reloading") then
+		Theme.playSound(Config.Sounds.Reload, 0.6)
+	end
+end)
 
 ContextActionService:BindAction("JupiterReload", function(_, state)
 	if state == Enum.UserInputState.Begin then
@@ -4980,7 +6093,7 @@ ContextActionService:SetTitle("JupiterReload", "R")
 RunService.RenderStepped:Connect(function()
 	local tool = equippedBlaster()
 	local armed = tool ~= nil
-	cross.Visible = armed
+	cross.Visible = armed and not player:GetAttribute("ADS")
 	UserInputService.MouseIconEnabled = not armed
 	if armed then
 		local m = UserInputService:GetMouseLocation()
@@ -5098,7 +6211,7 @@ Remotes:WaitForChild("HitConfirm").OnClientEvent:Connect(function(pos: Vector3, 
 	end
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX00000017"><Properties><string name="Name">HUD</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX0000001A"><Properties><string name="Name">HUD</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Main HUD: wave + reactor, crew roster (meme format), player card, banners, narrator, toasts, downed + game over screens.
 
 local Players = game:GetService("Players")
@@ -5185,7 +6298,7 @@ local function refreshWave()
 		waveSub.Text = `KEIS LEFT  {ReplicatedStorage:GetAttribute("KeisLeft") or 0}`
 	elseif phase == "Break" then
 		waveTitle.Text = string.format("WAVE %02d", w + 1)
-		waveSub.Text = `INCOMING IN {formatTime(t)}  ·  UPGRADE [Q]`
+		waveSub.Text = `INCOMING IN {formatTime(t)}  ·  ARMORY BENCH`
 	elseif phase == "GameOver" then
 		waveTitle.Text = "SIGNAL LOST"
 		waveSub.Text = `REACHED WAVE {w}`
@@ -5305,6 +6418,15 @@ local keysText = text({ Font = F.Heavy, TextSize = 20, TextColor3 = C.Cream, Tex
 	Position = UDim2.fromOffset(68, 32), Size = UDim2.new(1, -80, 0, 24), Parent = card })
 local healthBar = Theme.bar({ Position = UDim2.fromOffset(12, 66), Size = UDim2.new(1, -24, 0, 18), Parent = card }, C.Good)
 
+local lastKeys = 0
+player:GetAttributeChangedSignal("Keys"):Connect(function()
+	local k = (player:GetAttribute("Keys") :: number?) or 0
+	if k > lastKeys then
+		Theme.playSound(Config.Sounds.KeyPickup, 0.6, 1 + math.random() * 0.1)
+	end
+	lastKeys = k
+end)
+
 local function refreshCard()
 	local lvl = player:GetAttribute("Level") or 1
 	levelText.Text = tostring(lvl)
@@ -5319,7 +6441,7 @@ refreshCard()
 
 -- Owned perks (row of chips above the upgrade button)
 local Perks = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Perks"))
-local perkRow = make("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -168), Size = UDim2.fromOffset(300, 34),
+local perkRow = make("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -118), Size = UDim2.fromOffset(300, 34),
 	BackgroundTransparency = 1, Parent = gui })
 make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), Parent = perkRow })
 local function refreshPerks()
@@ -5570,7 +6692,7 @@ Remotes:WaitForChild("GameOver").OnClientEvent:Connect(function(summary: any)
 	over.Visible = false
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX00000018"><Properties><string name="Name">KeisAnimator</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX0000001B"><Properties><string name="Name">KeisAnimator</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Animates the Keis' spider legs on each client (tripod gait), so the server only moves the body.
 
 local RunService = game:GetService("RunService")
@@ -5641,7 +6763,7 @@ RunService.RenderStepped:Connect(function(dt)
 	end
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX00000019"><Properties><string name="Name">Menu</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX0000001C"><Properties><string name="Name">Menu</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Start menu: a live 3D scene (Keis standing on rock, Jupiter behind them), title, PLAY.
 -- Also plays full-screen transitions (e.g. the landing on Io).
 
@@ -5823,9 +6945,10 @@ text({ Font = F.Title, TextSize = 18, Position = UDim2.fromOffset(20, 16), Size 
 text({ Font = F.Body, TextSize = 15, Position = UDim2.fromOffset(20, 50), Size = UDim2.new(1, -40, 1, -60), TextWrapped = true,
 	TextYAlignment = Enum.TextYAlignment.Top, TextColor3 = C.Cream, Parent = how,
 	Text = "The Keis crawl out of the vents in waves. Keep them away from the reactor and keep your crew alive.\n\n"
-		.. "• Hold click to fire · Shift to sprint · R to reload\n"
+		.. "• Hold click to fire · Right-click to aim · R reload\n"
+		.. "• Shift to sprint · Q / E to lean around corners\n"
 		.. "• Shoot a Keis in the mouth for a CRIT\n"
-		.. "• Spend credits between waves: Q opens the Upgrade Terminal\n"
+		.. "• Upgrade and add scopes, lasers and barrels at the ARMORY bench on the bridge\n"
 		.. "• Hold E on a downed crewmate to revive them\n"
 		.. "• Survive wave 10 and the ship lands on Io, Jupiter's volcanic moon. Low gravity." })
 howBtn.MouseButton1Click:Connect(function()
@@ -5834,7 +6957,7 @@ end)
 
 -- Menu lifecycle ----------------------------------------------------------------------------------
 local menuOpen = true
-local HIDE = { "HUD", "Combat", "Shop", "Atmosphere" }
+local HIDE = { "HUD", "Combat", "Atmosphere", "Scope" }
 local function setGameGuis(enabled: boolean)
 	for _, name in HIDE do
 		local g = player.PlayerGui:FindFirstChild(name)
@@ -5916,8 +7039,8 @@ playBtn.MouseButton1Click:Connect(function()
 	fadeTo(0, 0.8)
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX0000001A"><Properties><string name="Name">Movement</string><ProtectedString name="Source"><![CDATA[--!strict
--- Movement feel: over-the-shoulder shooter camera, sprint, camera bob, hit shake, moon dust.
+<Item class="LocalScript" referent="RBX0000001D"><Properties><string name="Name">Movement</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Movement feel: sprint, head bob, hit shake, moon dust. (First person + aiming: Viewmodel.client)
 
 local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
@@ -5931,15 +7054,11 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-local SHOULDER = Vector3.new(1.9, 0.5, 0)
 local SPRINT_MULT = 1.45
 
-player.CameraMinZoomDistance = 6
-player.CameraMaxZoomDistance = 22
 
 local sprinting = false
 local sprintBase = 16
-local shoulderWas = false
 local offset = Vector3.zero
 local shake = 0
 local bobT = 0
@@ -6026,23 +7145,7 @@ RunService:BindToRenderStep("JupiterMovement", Enum.RenderPriority.Camera.Value 
 	if not humanoid or not root or camera.CameraType ~= Enum.CameraType.Custom then
 		return
 	end
-	local alive = humanoid.Health > 0 and not player:GetAttribute("Downed")
-	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-	local shoulder = alive and hasWeapon() and not touchOnly and not sprinting and not player:GetAttribute("UIOpen")
-
-	if shoulder then
-		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		humanoid.AutoRotate = false
-		local look = camera.CFrame.LookVector
-		local flat = Vector3.new(look.X, 0, look.Z)
-		if flat.Magnitude > 0.01 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-		end
-	elseif shoulderWas then
-		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		humanoid.AutoRotate = true
-	end
-	shoulderWas = shoulder
+	-- (first person + aiming live in Viewmodel.client)
 
 	-- walking bob
 	local v = root.AssemblyLinearVelocity
@@ -6052,13 +7155,8 @@ RunService:BindToRenderStep("JupiterMovement", Enum.RenderPriority.Camera.Value 
 	local bob = if humanoid.FloorMaterial ~= Enum.Material.Air
 		then Vector3.new(math.sin(bobT) * 0.07, math.abs(math.cos(bobT)) * 0.1, 0) * amount
 		else Vector3.zero
-	local target = (if shoulder then SHOULDER else Vector3.zero) + bob
-	offset = offset:Lerp(target, math.min(dt * 10, 1))
+	offset = offset:Lerp(bob * 0.6, math.min(dt * 10, 1)) -- a little head bob
 	humanoid.CameraOffset = offset
-
-	-- sprint FOV kick
-	local fov = 70 + (if sprinting and speed > 2 then 9 else 0)
-	camera.FieldOfView += (fov - camera.FieldOfView) * math.min(dt * 6, 1)
 
 	-- hit shake
 	if shake > 0 then
@@ -6083,7 +7181,7 @@ RunService:BindToRenderStep("JupiterMovement", Enum.RenderPriority.Camera.Value 
 	end
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX0000001B"><Properties><string name="Name">PerkPicker</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="LocalScript" referent="RBX0000001E"><Properties><string name="Name">PerkPicker</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Pick-1-of-3 perk cards after each wave (and from crates). Keys 1/2/3 to pick, reroll costs 1 key.
 
 local Players = game:GetService("Players")
@@ -6108,7 +7206,9 @@ local scale = make("UIScale", { Parent = gui })
 RunService.RenderStepped:Connect(function()
 	scale.Scale = math.clamp(camera.ViewportSize.Y / 900, 0.6, 1.1)
 end)
-make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45, BorderSizePixel = 0, Parent = gui })
+-- a Modal button frees the mouse while in first person
+make("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45, BorderSizePixel = 0,
+	Text = "", AutoButtonColor = false, Modal = true, Parent = gui })
 local header = text({ Font = F.Title, TextSize = 34, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.2), Size = UDim2.fromOffset(900, 44), Text = "CHOOSE A PERK", Parent = gui })
 local subheader = text({ Font = F.Mono, TextSize = 16, TextColor3 = C.Muted, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5),
@@ -6235,11 +7335,15 @@ RunService.RenderStepped:Connect(function()
 	subheader.Text = "PRESS 1 · 2 · 3   ·   THE KEIS DON'T WAIT"
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX0000001C"><Properties><string name="Name">ShipFX</string><ProtectedString name="Source"><![CDATA[--!strict
--- Local ship effects: sliding doors open when anyone (crew or Keis) comes close; console screens flicker.
+<Item class="LocalScript" referent="RBX0000001F"><Properties><string name="Name">ShipFX</string><ProtectedString name="Source"><![CDATA[--!strict
+-- Local ship effects: sliding doors (with sound), console flicker, fans, LEDs, gauges, background ambience.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local TweenService = game:GetService("TweenService")
 
 local OPEN_RANGE = 12
@@ -6302,6 +7406,17 @@ task.spawn(function()
 			end
 			if near ~= d.open then
 				d.open = near
+				if Config.Sounds.Door ~= "" and d.leaves[1] and d.leaves[1].Parent then
+					local snd = Instance.new("Sound")
+					snd.SoundId = Config.Sounds.Door
+					snd.Volume = 0.5
+					snd.RollOffMaxDistance = 40
+					snd.Parent = d.leaves[1]
+					snd:Play()
+					snd.Ended:Connect(function()
+						snd:Destroy()
+					end)
+				end
 				for _, leaf in d.leaves do
 					if leaf.Parent then
 						local closed = leaf:GetAttribute("ClosedCF") :: CFrame
@@ -6331,195 +7446,61 @@ task.spawn(function()
 		task.wait(math.random() * 0.8 + 0.2)
 	end
 end)
-]]></ProtectedString></Properties></Item>
-<Item class="LocalScript" referent="RBX0000001D"><Properties><string name="Name">Shop</string><ProtectedString name="Source"><![CDATA[--!strict
--- Upgrade terminal: Q (or the button) opens it. Upgrades reset each run, so every run is a new build.
 
-local ContextActionService = game:GetService("ContextActionService")
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-
-local Theme = require(script.Parent:WaitForChild("Theme"))
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local C, F = Theme.Colors, Theme.Fonts
-local make, text = Theme.make, Theme.text
-
-local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
-local Buy = Remotes:WaitForChild("BuyUpgrade") :: RemoteEvent
-local Repair = Remotes:WaitForChild("RepairReactor") :: RemoteEvent
-
-local gui = make("ScreenGui", { Name = "Shop", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 8,
-	Parent = player:WaitForChild("PlayerGui") })
-local scale = make("UIScale", { Parent = gui })
-RunService.RenderStepped:Connect(function()
-	scale.Scale = math.clamp(camera.ViewportSize.Y / 900, 0.6, 1.15)
-end)
-
--- open button (above the player card)
-local openBtn = make("TextButton", {
-	AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -120), Size = UDim2.fromOffset(170, 40),
-	BackgroundColor3 = C.Accent, Text = "UPGRADES  [Q]", Font = F.Title, TextSize = 13, TextColor3 = C.Bg,
-	AutoButtonColor = true, Parent = gui,
-}, { Theme.corner(8) })
-
--- panel
-local panel = Theme.panel({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(720, 530),
-	Visible = false, Parent = gui })
-text({ Font = F.Title, TextSize = 24, Position = UDim2.fromOffset(22, 16), Size = UDim2.fromOffset(400, 30), Text = "UPGRADE TERMINAL", Parent = panel })
-text({ Font = F.Meme, TextSize = 14, TextColor3 = C.Muted, Position = UDim2.fromOffset(22, 46), Size = UDim2.fromOffset(400, 18),
-	Text = "USS KEPLER · ARMORY · JULY 14 2011", Parent = panel })
-local credits = text({ Font = F.Heavy, TextSize = 24, TextColor3 = C.Gold, TextXAlignment = Enum.TextXAlignment.Right,
-	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -60, 0, 18), Size = UDim2.fromOffset(200, 30), Parent = panel })
-local close = make("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 16), Size = UDim2.fromOffset(34, 34),
-	BackgroundColor3 = C.Bg, Text = "✕", TextColor3 = C.Text, Font = F.Heavy, TextSize = 18, Parent = panel }, { Theme.corner(8) })
-
-local grid = make("Frame", { Position = UDim2.fromOffset(22, 80), Size = UDim2.new(1, -44, 0, 300), BackgroundTransparency = 1, Parent = panel })
-make("UIGridLayout", { CellSize = UDim2.fromOffset(216, 140), CellPadding = UDim2.fromOffset(12, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = grid })
-
-type Card = { def: any, level: TextLabel, pips: { Frame }, buy: TextButton }
-local cards: { Card } = {}
-
-for i, def in Config.Upgrades do
-	local cell = make("Frame", { BackgroundColor3 = C.Bg, BackgroundTransparency = 0.2, LayoutOrder = i, Parent = grid },
-		{ Theme.corner(10), Theme.stroke(C.Accent, 0.75, 1) })
-	text({ Font = F.Heavy, TextSize = 26, TextColor3 = C.Accent, Position = UDim2.fromOffset(12, 8), Size = UDim2.fromOffset(30, 30), Text = def.icon, Parent = cell })
-	text({ Font = F.Title, TextSize = 12, Position = UDim2.fromOffset(46, 10), Size = UDim2.new(1, -56, 0, 16), Text = def.name, Parent = cell })
-	text({ Font = F.Body, TextSize = 13, TextColor3 = C.Muted, Position = UDim2.fromOffset(46, 28), Size = UDim2.new(1, -56, 0, 16), Text = def.desc, Parent = cell })
-	local pipRow = make("Frame", { Position = UDim2.fromOffset(12, 56), Size = UDim2.new(1, -24, 0, 8), BackgroundTransparency = 1, Parent = cell })
-	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), Parent = pipRow })
-	local pips = {}
-	for _ = 1, def.max do
-		table.insert(pips, make("Frame", { Size = UDim2.new(1 / def.max, -4, 1, 0), BackgroundColor3 = Color3.fromRGB(50, 42, 56), BorderSizePixel = 0, Parent = pipRow }, { Theme.corner(3) }))
-	end
-	local level = text({ Font = F.Bold, TextSize = 12, TextColor3 = C.Cream, Position = UDim2.fromOffset(12, 70), Size = UDim2.new(1, -24, 0, 16), Parent = cell })
-	local buy = make("TextButton", { Position = UDim2.new(0, 12, 1, -44), Size = UDim2.new(1, -24, 0, 34), BackgroundColor3 = C.Accent,
-		Font = F.Heavy, TextSize = 15, TextColor3 = C.Bg, Text = "", Parent = cell }, { Theme.corner(8) })
-	buy.MouseButton1Click:Connect(function()
-		Buy:FireServer(def.id)
-	end)
-	table.insert(cards, { def = def, level = level, pips = pips, buy = buy })
-end
-
-local repairBtn = make("TextButton", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -18), Size = UDim2.new(1, -44, 0, 44),
-	BackgroundColor3 = C.Cyan, Font = F.Title, TextSize = 14, TextColor3 = C.Bg,
-	Text = `REPAIR REACTOR  +{Config.REPAIR_AMOUNT} HP  ·  ◆ {Config.REPAIR_COST}`, Parent = panel }, { Theme.corner(8) })
-repairBtn.MouseButton1Click:Connect(function()
-	Repair:FireServer()
-end)
-
-local MINIGUN = Config.Weapons.Minigun
-local minigunBtn = make("TextButton", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -72), Size = UDim2.new(1, -44, 0, 44),
-	BackgroundColor3 = C.Gold, Font = F.Title, TextSize = 14, TextColor3 = C.Bg, Text = "", Parent = panel }, { Theme.corner(8) })
-minigunBtn.MouseButton1Click:Connect(function()
-	Buy:FireServer("Minigun")
-end)
-
-local function refresh()
-	local money = player:GetAttribute("Credits") or 0
-	credits.Text = `◆ {money}`
-	for _, card in cards do
-		local lvl = player:GetAttribute("Up_" .. card.def.id) or 0
-		for i, pip in card.pips do
-			pip.BackgroundColor3 = if i <= lvl then C.Accent else Color3.fromRGB(50, 42, 56)
-		end
-		card.level.Text = `LEVEL {lvl} / {card.def.max}`
-		if lvl >= card.def.max then
-			card.buy.Text = "MAXED"
-			card.buy.BackgroundColor3 = Color3.fromRGB(60, 52, 66)
-			card.buy.TextColor3 = C.Muted
-		else
-			local cost = Config.upgradeCost(card.def, lvl)
-			card.buy.Text = `BUY  ◆ {cost}`
-			local afford = money >= cost
-			card.buy.BackgroundColor3 = if afford then C.Accent else Color3.fromRGB(60, 52, 66)
-			card.buy.TextColor3 = if afford then C.Bg else C.Muted
+-- spinning wall fans, blinking LEDs, twitching gauge needles ---------------------------------------------
+RunService.RenderStepped:Connect(function(dt)
+	local now = os.clock()
+	for _, fan in CollectionService:GetTagged("Fan") do
+		if fan:IsA("Model") and fan.PrimaryPart then
+			fan:PivotTo(fan:GetPivot() * CFrame.Angles(dt * 8, 0, 0))
 		end
 	end
-	if player:GetAttribute("Weapon") == "Minigun" then
-		minigunBtn.Text = `{MINIGUN.name}  ·  EQUIPPED`
-		minigunBtn.BackgroundColor3 = Color3.fromRGB(60, 52, 66)
-		minigunBtn.TextColor3 = C.Muted
-	else
-		local afford = money >= MINIGUN.cost
-		minigunBtn.Text = `UNLOCK {MINIGUN.name}  ·  ◆ {MINIGUN.cost}`
-		minigunBtn.BackgroundColor3 = if afford then C.Gold else Color3.fromRGB(60, 52, 66)
-		minigunBtn.TextColor3 = if afford then C.Bg else C.Muted
-	end
-	local hp = ReplicatedStorage:GetAttribute("ReactorHP") or 0
-	local max = ReplicatedStorage:GetAttribute("ReactorMax") or 1
-	local canRepair = money >= Config.REPAIR_COST and hp < max
-	repairBtn.BackgroundColor3 = if canRepair then C.Cyan else Color3.fromRGB(60, 52, 66)
-	repairBtn.TextColor3 = if canRepair then C.Bg else C.Muted
-end
-player.AttributeChanged:Connect(refresh)
-ReplicatedStorage:GetAttributeChangedSignal("ReactorHP"):Connect(refresh)
-refresh()
-
-local function setOpen(open: boolean)
-	if open == panel.Visible then
-		return
-	end
-	panel.Visible = open
-	player:SetAttribute("UIOpen", open)
-	if open then
-		panel.Size = UDim2.fromOffset(680, 500)
-		Theme.tween(panel, 0.2, { Size = UDim2.fromOffset(720, 530) }, Enum.EasingStyle.Back)
-		refresh()
-	end
-end
-openBtn.MouseButton1Click:Connect(function()
-	setOpen(not panel.Visible)
-end)
-close.MouseButton1Click:Connect(function()
-	setOpen(false)
-end)
-ContextActionService:BindAction("JupiterShop", function(_, state)
-	if state == Enum.UserInputState.Begin then
-		setOpen(not panel.Visible)
-	end
-	return Enum.ContextActionResult.Pass
-end, false, Enum.KeyCode.Q, Enum.KeyCode.ButtonY)
-
--- purchase feedback
-Remotes:WaitForChild("Purchased").OnClientEvent:Connect(function(id: string)
-	Theme.playSound(Config.Sounds.Buy, 0.6)
-	for _, card in cards do
-		if card.def.id == id then
-			local b = card.buy
-			b.Size = UDim2.new(1, -16, 0, 38)
-			Theme.tween(b, 0.2, { Size = UDim2.new(1, -24, 0, 34) }, Enum.EasingStyle.Back)
+	for _, led in CollectionService:GetTagged("BlinkLED") do
+		if led:IsA("BasePart") then
+			local rate = (led:GetAttribute("BlinkRate") :: number?) or 1
+			led.Transparency = if (now * rate) % 1 < 0.5 then 0 else 0.85
 		end
 	end
 end)
-
--- the button pulses during breaks if you can afford something
 task.spawn(function()
 	while true do
-		local phase = ReplicatedStorage:GetAttribute("Phase")
-		local money = player:GetAttribute("Credits") or 0
-		local canAfford = false
-		for _, card in cards do
-			local lvl = player:GetAttribute("Up_" .. card.def.id) or 0
-			if lvl < card.def.max and money >= Config.upgradeCost(card.def, lvl) then
-				canAfford = true
+		for _, face in CollectionService:GetTagged("Gauge") do
+			local needle = face:FindFirstChild("Needle", true) :: Frame?
+			if needle then
+				needle.Rotation = math.clamp(needle.Rotation + math.random(-6, 6), -75, 75)
 			end
 		end
-		if phase == "Break" and canAfford and not panel.Visible then
-			Theme.tween(openBtn, 0.4, { BackgroundColor3 = C.Gold })
-			task.wait(0.45)
-			Theme.tween(openBtn, 0.4, { BackgroundColor3 = C.Accent })
-			task.wait(0.45)
-		else
-			openBtn.BackgroundColor3 = C.Accent
-			task.wait(0.5)
-		end
+		task.wait(0.15)
+	end
+end)
+
+-- constant background ambience: ship hum, or the wind on Io
+local function loop(id: string, volume: number): Sound?
+	if id == "" then
+		return nil
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Looped = true
+	s.Volume = 0
+	s.Parent = SoundService
+	s:Play()
+	return s
+end
+local hum = loop(Config.Sounds.ShipHum, 0.35)
+local wind = loop(Config.Sounds.IoWind, 0.45)
+RunService.Heartbeat:Connect(function(dt)
+	local onMoon = ReplicatedStorage:GetAttribute("Stage") == "Moon"
+	local inGame = workspace.CurrentCamera.CameraType == Enum.CameraType.Custom
+	if hum then
+		hum.Volume += ((if inGame and not onMoon then 0.35 else 0) - hum.Volume) * math.min(dt * 2, 1)
+	end
+	if wind then
+		wind.Volume += ((if inGame and onMoon then 0.45 else 0) - wind.Volume) * math.min(dt * 2, 1)
 	end
 end)
 ]]></ProtectedString></Properties></Item>
-<Item class="ModuleScript" referent="RBX0000001E"><Properties><string name="Name">Theme</string><ProtectedString name="Source"><![CDATA[--!strict
+<Item class="ModuleScript" referent="RBX00000020"><Properties><string name="Name">Theme</string><ProtectedString name="Source"><![CDATA[--!strict
 -- Shared UI style: dark glass panels, Jupiter-orange accents, sci-fi headings.
 
 local TweenService = game:GetService("TweenService")
@@ -6707,6 +7688,342 @@ function Theme.playSound(id: string, volume: number?, speed: number?)
 end
 
 return Theme
+]]></ProtectedString></Properties></Item>
+<Item class="LocalScript" referent="RBX00000021"><Properties><string name="Name">Viewmodel</string><ProtectedString name="Source"><![CDATA[--!strict
+-- First person: weapon viewmodel with arms, sway, bob, recoil, reload/sprint poses, aim down sights (right click),
+-- scope overlay, Q/E lean, laser beam, spinning minigun barrels.
+
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local WeaponModel = require(Shared:WaitForChild("WeaponModel"))
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+
+local SUIT = Color3.fromRGB(232, 232, 228)
+local GLOVE = Color3.fromRGB(60, 62, 68)
+local CUFF = Color3.fromRGB(255, 138, 61)
+
+-- state
+local vm: any = nil
+local vmKey = ""
+local aiming = false
+local aimBlend = 0
+local leanTarget = 0
+local lean = 0
+local sway = Vector2.zero
+local bobT = 0
+local kick = 0
+local lastShotSeen = 0
+local spinAngle, spinSpeed = 0, 0
+local sprintBlend, reloadBlend = 0, 0
+local laserDot: Part? = nil
+
+-- scope overlay (black ring around a clear circle + crosshair)
+local scopeGui = Instance.new("ScreenGui")
+scopeGui.Name = "Scope"
+scopeGui.IgnoreGuiInset = true
+scopeGui.ResetOnSpawn = false
+scopeGui.DisplayOrder = 4
+scopeGui.Enabled = false
+scopeGui.Parent = player:WaitForChild("PlayerGui")
+local ring = Instance.new("Frame")
+ring.AnchorPoint = Vector2.new(0.5, 0.5)
+ring.Position = UDim2.fromScale(0.5, 0.5)
+ring.Size = UDim2.fromScale(0.62, 0.62)
+ring.SizeConstraint = Enum.SizeConstraint.RelativeYY
+ring.BackgroundTransparency = 1
+ring.Parent = scopeGui
+Instance.new("UICorner", ring).CornerRadius = UDim.new(0.5, 0)
+local ringStroke = Instance.new("UIStroke")
+ringStroke.Thickness = 2000 -- everything outside the circle is black
+ringStroke.Color = Color3.new(0, 0, 0)
+ringStroke.Parent = ring
+for _, d in { { 1, 0.004 }, { 0.004, 1 } } do
+	local line = Instance.new("Frame")
+	line.AnchorPoint = Vector2.new(0.5, 0.5)
+	line.Position = UDim2.fromScale(0.5, 0.5)
+	line.Size = UDim2.fromScale(d[1], d[2])
+	line.BackgroundColor3 = Color3.new(0, 0, 0)
+	line.BorderSizePixel = 0
+	line.Parent = ring
+end
+local reticleDot = Instance.new("Frame")
+reticleDot.AnchorPoint = Vector2.new(0.5, 0.5)
+reticleDot.Position = UDim2.fromScale(0.5, 0.5)
+reticleDot.Size = UDim2.fromOffset(5, 5)
+reticleDot.BackgroundColor3 = Color3.fromRGB(255, 40, 30)
+reticleDot.BorderSizePixel = 0
+reticleDot.Parent = ring
+Instance.new("UICorner", reticleDot).CornerRadius = UDim.new(1, 0)
+
+local function equippedTool(): Tool?
+	local c = player.Character
+	if not c then
+		return nil
+	end
+	for _, t in c:GetChildren() do
+		if t:IsA("Tool") and t:GetAttribute("IsWeapon") then
+			return t
+		end
+	end
+	return nil
+end
+
+local function destroyVM()
+	if vm then
+		vm.model:Destroy()
+		vm = nil
+	end
+	vmKey = ""
+	if laserDot then
+		laserDot:Destroy()
+		laserDot = nil
+	end
+	scopeGui.Enabled = false
+end
+
+-- a suited forearm from the hand back toward the screen edge
+local function arm(model: Model, root: BasePart, hand: Vector3, toShoulder: Vector3)
+	local shoulder = hand + toShoulder
+	local len = toShoulder.Magnitude
+	local function piece(name: string, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material)
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Size = size
+		p.CFrame = root.CFrame * cf
+		p.Color = color
+		p.Material = material
+		p.CanCollide = false
+		p.CanQuery = false
+		p.CanTouch = false
+		p.CastShadow = false
+		p.Massless = true
+		p.Parent = model
+		local w = Instance.new("WeldConstraint")
+		w.Part0 = root
+		w.Part1 = p
+		w.Parent = p
+	end
+	local dirCF = CFrame.lookAt(hand, shoulder)
+	piece("Sleeve", Vector3.new(0.46, 0.46, len), CFrame.lookAt((hand + shoulder) / 2, shoulder), SUIT, Enum.Material.Fabric)
+	piece("Cuff", Vector3.new(0.5, 0.5, 0.14), dirCF * CFrame.new(0, 0, -0.32), CUFF, Enum.Material.SmoothPlastic)
+	piece("Glove", Vector3.new(0.36, 0.38, 0.46), dirCF * CFrame.new(0, 0, -0.05), GLOVE, Enum.Material.Fabric)
+end
+
+local function build(tool: Tool)
+	destroyVM()
+	local weaponId = (tool:GetAttribute("WeaponId") :: string?) or "Blaster"
+	local att = WeaponModel.decode(player:GetAttribute("Attachments") :: string?)
+	local model = Instance.new("Model")
+	model.Name = "Viewmodel"
+	local built = WeaponModel.build(weaponId, att, model, "Root")
+	built.root.Anchored = true
+	if weaponId == "Minigun" then
+		arm(model, built.root, built.grip.Position, Vector3.new(0.4, -0.9, 2.2))
+		arm(model, built.root, built.foregrip.Position, Vector3.new(-0.8, -1, 1.6))
+	else
+		arm(model, built.root, built.grip.Position, Vector3.new(0.35, -0.95, 2.1))
+		arm(model, built.root, built.foregrip.Position, Vector3.new(-0.95, -0.85, 1.7))
+	end
+	model.Parent = camera
+	local opticDef = Config.attachment("Optic", att.Optic)
+	vm = {
+		model = model,
+		built = built,
+		weaponId = weaponId,
+		att = att,
+		zoom = if opticDef then opticDef.zoom else 1.15,
+		scoped = att.Optic == "ACOG" or att.Optic == "Sniper",
+		hip = if weaponId == "Minigun" then CFrame.new(1.05, -1.3, -1.5) else CFrame.new(0.95, -0.9, -2.05),
+	}
+	if built.laser then
+		local dot = Instance.new("Part")
+		dot.Name = "LaserDot"
+		dot.Shape = Enum.PartType.Ball
+		dot.Size = Vector3.one * 0.18
+		dot.Anchored = true
+		dot.CanCollide = false
+		dot.CanQuery = false
+		dot.CanTouch = false
+		dot.Material = Enum.Material.Neon
+		dot.Color = (built.laser:GetAttribute("Color") :: Color3?) or Color3.new(1, 0, 0)
+		dot.Parent = camera
+		local a0 = Instance.new("Attachment")
+		a0.Parent = built.laser
+		local a1 = Instance.new("Attachment")
+		a1.Parent = dot
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = a0
+		beam.Attachment1 = a1
+		beam.Width0 = 0.03
+		beam.Width1 = 0.03
+		beam.FaceCamera = true
+		beam.LightEmission = 1
+		beam.Color = ColorSequence.new(dot.Color)
+		beam.Transparency = NumberSequence.new(0.35, 0.8)
+		beam.Parent = built.laser
+		laserDot = dot
+	end
+	vmKey = weaponId .. "|" .. WeaponModel.encode(att)
+end
+
+-- Input ---------------------------------------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, processed)
+	if input.UserInputType == Enum.UserInputType.MouseButton2 and not processed then
+		aiming = true
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		aiming = false
+	end
+end)
+ContextActionService:BindAction("JupiterAim", function(_, state)
+	if state == Enum.UserInputState.Begin then
+		aiming = not aiming -- touch / gamepad: toggle
+	end
+	return Enum.ContextActionResult.Pass
+end, true, Enum.KeyCode.ButtonL2)
+ContextActionService:SetTitle("JupiterAim", "AIM")
+ContextActionService:BindAction("JupiterLean", function(name, state, input)
+	local dir = if input.KeyCode == Enum.KeyCode.Q then -1 else 1
+	if state == Enum.UserInputState.Begin then
+		leanTarget = dir
+	elseif state == Enum.UserInputState.End and leanTarget == dir then
+		leanTarget = 0
+	end
+	local _ = name
+	return Enum.ContextActionResult.Pass
+end, false, Enum.KeyCode.Q, Enum.KeyCode.E)
+
+-- Frame ---------------------------------------------------------------------------------------------
+RunService:BindToRenderStep("JupiterViewmodel", Enum.RenderPriority.Camera.Value + 3, function(dt)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local tool = equippedTool()
+	local inGame = camera.CameraType == Enum.CameraType.Custom
+	if not humanoid or not root or not inGame or humanoid.Health <= 0 or player:GetAttribute("Downed") then
+		destroyVM()
+		player:SetAttribute("ADS", false)
+		return
+	end
+
+	-- first person from the moment you're in the game (not in the menu)
+	if player.CameraMode ~= Enum.CameraMode.LockFirstPerson then
+		player.CameraMode = Enum.CameraMode.LockFirstPerson
+	end
+
+	-- hide your own body, suit and the third-person gun in first person
+	for _, d in character:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.LocalTransparencyModifier = 1
+		end
+	end
+
+	-- lean (Q / E)
+	lean += (leanTarget - lean) * math.min(dt * 10, 1)
+	if math.abs(lean) > 0.001 then
+		camera.CFrame *= CFrame.new(lean * 1.15, -math.abs(lean) * 0.12, 0) * CFrame.Angles(0, 0, -lean * math.rad(13))
+	end
+
+	if not tool then
+		destroyVM()
+		player:SetAttribute("ADS", false)
+		camera.FieldOfView += (70 - camera.FieldOfView) * math.min(dt * 8, 1)
+		return
+	end
+	local key = ((tool:GetAttribute("WeaponId") :: string?) or "Blaster") .. "|" .. WeaponModel.encode(WeaponModel.decode(player:GetAttribute("Attachments") :: string?))
+	if not vm or key ~= vmKey then
+		build(tool)
+	end
+	local built = vm.built
+
+	local sprinting = player:GetAttribute("Sprinting") == true
+	local reloading = player:GetAttribute("Reloading") == true
+	local ads = aiming and not sprinting and not reloading and not player:GetAttribute("UIOpen")
+	aimBlend += ((if ads then 1 else 0) - aimBlend) * math.min(dt * 12, 1)
+	sprintBlend += ((if sprinting then 1 else 0) - sprintBlend) * math.min(dt * 8, 1)
+	reloadBlend += ((if reloading then 1 else 0) - reloadBlend) * math.min(dt * 8, 1)
+	player:SetAttribute("ADS", aimBlend > 0.5)
+
+	-- recoil: Combat.client stamps LastShot on every shot
+	local shot = (player:GetAttribute("LastShot") :: number?) or 0
+	if shot ~= lastShotSeen then
+		lastShotSeen = shot
+		local k = if vm.weaponId == "Minigun" then 0.35 else 1
+		if vm.att.Muzzle == "Compensator" then
+			k *= 0.5
+		end
+		kick = math.min(kick + k * (1 - aimBlend * 0.5), 1.5)
+		spinSpeed = 30
+	end
+	kick *= math.exp(-dt * 14)
+
+	-- sway from mouse movement + walking bob
+	local md = UserInputService:GetMouseDelta()
+	local swayTarget = Vector2.new(math.clamp(-md.X * 0.0025, -0.08, 0.08), math.clamp(-md.Y * 0.0025, -0.08, 0.08)) * (1 - aimBlend * 0.85)
+	sway = sway:Lerp(swayTarget, math.min(dt * 10, 1))
+	local v = root.AssemblyLinearVelocity
+	local speed = Vector3.new(v.X, 0, v.Z).Magnitude
+	local moving = math.clamp(speed / 16, 0, 1.5) * (if humanoid.FloorMaterial == Enum.Material.Air then 0.2 else 1)
+	bobT += dt * (6 + speed * 0.35)
+	local bobAmt = moving * (1 - aimBlend * 0.85)
+	local bob = CFrame.new(math.sin(bobT) * 0.045 * bobAmt, -math.abs(math.cos(bobT)) * 0.05 * bobAmt, 0) * CFrame.Angles(0, 0, math.sin(bobT) * 0.02 * bobAmt)
+
+	-- poses
+	local adsCF = CFrame.new(0, 0, -0.12) * CFrame.new(-built.sight.Position)
+	local pose = vm.hip:Lerp(adsCF, aimBlend)
+	local sprintPose = CFrame.new(0.15 * sprintBlend, -0.25 * sprintBlend, 0.1 * sprintBlend) * CFrame.Angles(-0.25 * sprintBlend, 0.7 * sprintBlend, 0.3 * sprintBlend)
+	local reloadPose = CFrame.new(0, -0.3 * reloadBlend, 0) * CFrame.Angles(-0.5 * reloadBlend, 0.25 * reloadBlend, 0.55 * reloadBlend)
+	local recoil = CFrame.new(0, 0.02 * kick, 0.22 * kick) * CFrame.Angles(0.07 * kick, 0, 0)
+	local swayCF = CFrame.Angles(sway.Y, sway.X, sway.X * 0.6)
+	built.root.CFrame = camera.CFrame * pose * bob * swayCF * sprintPose * reloadPose * recoil
+
+	-- minigun barrels
+	if built.spin then
+		spinSpeed = math.max(0, spinSpeed - dt * 25)
+		spinAngle += spinSpeed * dt
+		built.spin.Transform = CFrame.Angles(spinAngle, 0, 0)
+	end
+
+	-- laser dot
+	if laserDot and built.laser then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { character, camera }
+		local origin = built.laser.Position
+		local dir = built.root.CFrame.LookVector * 250
+		local hit = workspace:Raycast(origin, dir, params)
+		laserDot.CFrame = CFrame.new(if hit then hit.Position else origin + dir)
+	end
+
+	-- scopes: full overlay instead of the model when aimed in
+	local scopedIn = vm.scoped and aimBlend > 0.9
+	scopeGui.Enabled = scopedIn
+	for _, p in vm.model:GetDescendants() do
+		if p:IsA("BasePart") then
+			p.LocalTransparencyModifier = if scopedIn then 1 else 0
+		end
+	end
+
+	-- field of view: sprint widens, aiming zooms by the optic's magnification
+	local fov = 70 + (if sprinting and speed > 2 then 8 else 0)
+	fov = fov + ((70 / vm.zoom) - fov) * aimBlend
+	camera.FieldOfView += (fov - camera.FieldOfView) * math.min(dt * 14, 1)
+end)
+
+player.CharacterAdded:Connect(function()
+	destroyVM()
+end)
 ]]></ProtectedString></Properties></Item>
 </Item>
 </Item>

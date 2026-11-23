@@ -1,8 +1,12 @@
 --!strict
--- Local ship effects: sliding doors open when anyone (crew or Keis) comes close; console screens flicker.
+-- Local ship effects: sliding doors (with sound), console flicker, fans, LEDs, gauges, background ambience.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local TweenService = game:GetService("TweenService")
 
 local OPEN_RANGE = 12
@@ -65,6 +69,17 @@ task.spawn(function()
 			end
 			if near ~= d.open then
 				d.open = near
+				if Config.Sounds.Door ~= "" and d.leaves[1] and d.leaves[1].Parent then
+					local snd = Instance.new("Sound")
+					snd.SoundId = Config.Sounds.Door
+					snd.Volume = 0.5
+					snd.RollOffMaxDistance = 40
+					snd.Parent = d.leaves[1]
+					snd:Play()
+					snd.Ended:Connect(function()
+						snd:Destroy()
+					end)
+				end
 				for _, leaf in d.leaves do
 					if leaf.Parent then
 						local closed = leaf:GetAttribute("ClosedCF") :: CFrame
@@ -92,5 +107,58 @@ task.spawn(function()
 			end
 		end
 		task.wait(math.random() * 0.8 + 0.2)
+	end
+end)
+
+-- spinning wall fans, blinking LEDs, twitching gauge needles ---------------------------------------------
+RunService.RenderStepped:Connect(function(dt)
+	local now = os.clock()
+	for _, fan in CollectionService:GetTagged("Fan") do
+		if fan:IsA("Model") and fan.PrimaryPart then
+			fan:PivotTo(fan:GetPivot() * CFrame.Angles(dt * 8, 0, 0))
+		end
+	end
+	for _, led in CollectionService:GetTagged("BlinkLED") do
+		if led:IsA("BasePart") then
+			local rate = (led:GetAttribute("BlinkRate") :: number?) or 1
+			led.Transparency = if (now * rate) % 1 < 0.5 then 0 else 0.85
+		end
+	end
+end)
+task.spawn(function()
+	while true do
+		for _, face in CollectionService:GetTagged("Gauge") do
+			local needle = face:FindFirstChild("Needle", true) :: Frame?
+			if needle then
+				needle.Rotation = math.clamp(needle.Rotation + math.random(-6, 6), -75, 75)
+			end
+		end
+		task.wait(0.15)
+	end
+end)
+
+-- constant background ambience: ship hum, or the wind on Io
+local function loop(id: string, volume: number): Sound?
+	if id == "" then
+		return nil
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Looped = true
+	s.Volume = 0
+	s.Parent = SoundService
+	s:Play()
+	return s
+end
+local hum = loop(Config.Sounds.ShipHum, 0.35)
+local wind = loop(Config.Sounds.IoWind, 0.45)
+RunService.Heartbeat:Connect(function(dt)
+	local onMoon = ReplicatedStorage:GetAttribute("Stage") == "Moon"
+	local inGame = workspace.CurrentCamera.CameraType == Enum.CameraType.Custom
+	if hum then
+		hum.Volume += ((if inGame and not onMoon then 0.35 else 0) - hum.Volume) * math.min(dt * 2, 1)
+	end
+	if wind then
+		wind.Volume += ((if inGame and onMoon then 0.45 else 0) - wind.Volume) * math.min(dt * 2, 1)
 	end
 end)

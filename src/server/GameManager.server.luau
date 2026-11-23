@@ -37,7 +37,8 @@ for _, name in {
 	"Transition", -- (text, seconds) fade to black and back
 	"PerkOffer", -- (offerId, cards, rarity) pick-1-of-3
 	"Arc", -- (kind, points) chain lightning / ricochet / explosion visuals
-	"PickPerk", "RerollPerk", -- client → server
+	"OpenArmory", -- () open the armory screen
+	"PickPerk", "RerollPerk", "Attachment", -- client → server
 	"Shoot", "Reload", "BuyUpgrade", "RepairReactor", "PlayRequest", -- client → server
 } do
 	local r = Instance.new("RemoteEvent")
@@ -508,6 +509,9 @@ Combat.hooks.repairReactor = function(player: Player): boolean
 	return true
 end
 Combat.init(remotes)
+ship.armoryPrompt.Triggered:Connect(function(player)
+	R.OpenArmory:FireClient(player)
+end)
 
 PerkSystem.init(remotes)
 PerkSystem.hooks.onChanged = function(player: Player)
@@ -813,6 +817,9 @@ local function landOnIo()
 	task.wait(1.2) -- screens are black now
 	if not moon then
 		moon = MoonBuilder.build()
+		moon.armoryPrompt.Triggered:Connect(function(player)
+			R.OpenArmory:FireClient(player)
+		end)
 	end
 	applyStage({ name = "Moon", spawn = moon.spawn, reactor = moon.reactor, reactorRadius = moon.reactorRadius,
 		vents = moon.vents, roomCenters = moon.roomCenters })

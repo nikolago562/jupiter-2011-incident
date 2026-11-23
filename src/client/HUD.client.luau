@@ -85,7 +85,7 @@ local function refreshWave()
 		waveSub.Text = `KEIS LEFT  {ReplicatedStorage:GetAttribute("KeisLeft") or 0}`
 	elseif phase == "Break" then
 		waveTitle.Text = string.format("WAVE %02d", w + 1)
-		waveSub.Text = `INCOMING IN {formatTime(t)}  ·  UPGRADE [Q]`
+		waveSub.Text = `INCOMING IN {formatTime(t)}  ·  ARMORY BENCH`
 	elseif phase == "GameOver" then
 		waveTitle.Text = "SIGNAL LOST"
 		waveSub.Text = `REACHED WAVE {w}`
@@ -205,6 +205,15 @@ local keysText = text({ Font = F.Heavy, TextSize = 20, TextColor3 = C.Cream, Tex
 	Position = UDim2.fromOffset(68, 32), Size = UDim2.new(1, -80, 0, 24), Parent = card })
 local healthBar = Theme.bar({ Position = UDim2.fromOffset(12, 66), Size = UDim2.new(1, -24, 0, 18), Parent = card }, C.Good)
 
+local lastKeys = 0
+player:GetAttributeChangedSignal("Keys"):Connect(function()
+	local k = (player:GetAttribute("Keys") :: number?) or 0
+	if k > lastKeys then
+		Theme.playSound(Config.Sounds.KeyPickup, 0.6, 1 + math.random() * 0.1)
+	end
+	lastKeys = k
+end)
+
 local function refreshCard()
 	local lvl = player:GetAttribute("Level") or 1
 	levelText.Text = tostring(lvl)
@@ -219,7 +228,7 @@ refreshCard()
 
 -- Owned perks (row of chips above the upgrade button)
 local Perks = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Perks"))
-local perkRow = make("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -168), Size = UDim2.fromOffset(300, 34),
+local perkRow = make("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -118), Size = UDim2.fromOffset(300, 34),
 	BackgroundTransparency = 1, Parent = gui })
 make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), Parent = perkRow })
 local function refreshPerks()
