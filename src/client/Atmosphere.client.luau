@@ -95,7 +95,10 @@ end
 local alarmSound: Sound? = nil
 if Config.Sounds.Alarm ~= "" then
 	alarmSound = make("Sound", { SoundId = Config.Sounds.Alarm, Looped = true, Volume = 0, Parent = SoundService })
-	;(alarmSound :: Sound):Play()
+	do
+		local target = alarmSound :: Sound
+		target:Play()
+	end
 end
 
 -- Per frame --------------------------------------------------------------------------------------------

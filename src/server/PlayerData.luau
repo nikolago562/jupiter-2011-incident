@@ -119,12 +119,14 @@ function PlayerData.save(player: Player)
 	if not data or not store then
 		return
 	end
+	local ds = store :: DataStore
 	pcall(function()
-		(store :: DataStore):SetAsync("u" .. player.UserId, data)
+		ds:SetAsync("u" .. player.UserId, data)
 	end)
 	if bestWaveStore and data.BestWave > 0 then
+		local ods = bestWaveStore :: OrderedDataStore
 		pcall(function()
-			(bestWaveStore :: OrderedDataStore):SetAsync(tostring(player.UserId), data.BestWave)
+			ods:SetAsync(tostring(player.UserId), data.BestWave)
 		end)
 	end
 end

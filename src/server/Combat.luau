@@ -244,7 +244,10 @@ local function startReload(player: Player)
 	end
 	st.reloading = true
 	publish(player)
-	;(remotes:FindFirstChild("CrewAction") :: RemoteEvent):FireAllClients(player.UserId, "Reloading!!")
+	do
+		local target = remotes:FindFirstChild("CrewAction") :: RemoteEvent
+		target:FireAllClients(player.UserId, "Reloading!!")
+	end
 	task.delay(Combat.stats(player).reload, function()
 		if states[player] == st then
 			st.ammo = Combat.stats(player).mag
@@ -264,8 +267,11 @@ local function hitKeis(player: Player, k: any, dmg: number, at: Vector3, crit: b
 		st.damageDealt += math.min(dmg, k.hp)
 	end
 	local killed = k:takeDamage(dmg, player)
-	;(remotes:FindFirstChild("HitConfirm") :: RemoteEvent):FireClient(player, at, math.floor(dmg), crit, killed,
+	do
+		local target = remotes:FindFirstChild("HitConfirm") :: RemoteEvent
+		target:FireClient(player, at, math.floor(dmg), crit, killed,
 		if killed then k.def.reward else 0, k.def.passive == true)
+	end
 	return killed
 end
 
@@ -297,7 +303,10 @@ arcFrom = function(player: Player, from: Vector3, dmg: number, jumps: number, ra
 		last, pos = target, tp
 	end
 	if #points > 1 then
-		;(remotes:FindFirstChild("Arc") :: RemoteEvent):FireAllClients(kind, points)
+		do
+			local target = remotes:FindFirstChild("Arc") :: RemoteEvent
+			target:FireAllClients(kind, points)
+		end
 	end
 end
 
@@ -306,7 +315,10 @@ explode = function(player: Player, at: Vector3, dmg: number, except: any)
 	for _, k in keisNear(at, 9, except) do
 		hitKeis(player, k, dmg, k.root.Position + Vector3.new(0, 3, 0), false)
 	end
-	;(remotes:FindFirstChild("Arc") :: RemoteEvent):FireAllClients("boom", { at })
+	do
+		local target = remotes:FindFirstChild("Arc") :: RemoteEvent
+		target:FireAllClients("boom", { at })
+	end
 end
 
 local function onShoot(player: Player, aimPos: any)
@@ -389,7 +401,10 @@ local function onShoot(player: Player, aimPos: any)
 			end
 		end
 	end
-	;(remotes:FindFirstChild("ShotFx") :: RemoteEvent):FireAllClients(player, origin, hits)
+	do
+		local target = remotes:FindFirstChild("ShotFx") :: RemoteEvent
+		target:FireAllClients(player, origin, hits)
+	end
 	if st.ammo <= 0 then
 		startReload(player)
 	else
@@ -414,8 +429,14 @@ local function onBuy(player: Player, id: any)
 				giveWeapon(player, humanoid)
 			end
 			publish(player)
-			;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, id)
-			;(remotes:FindFirstChild("CrewAction") :: RemoteEvent):FireAllClients(player.UserId, "I GOT A MINIGUN")
+			do
+				local target = remotes:FindFirstChild("Purchased") :: RemoteEvent
+				target:FireClient(player, id)
+			end
+			do
+				local target = remotes:FindFirstChild("CrewAction") :: RemoteEvent
+				target:FireAllClients(player.UserId, "I GOT A MINIGUN")
+			end
 		end
 		return
 	end
@@ -448,7 +469,10 @@ local function onBuy(player: Player, id: any)
 		st.ammo = s.mag
 	end
 	publish(player)
-	;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, id)
+	do
+		local target = remotes:FindFirstChild("Purchased") :: RemoteEvent
+		target:FireClient(player, id)
+	end
 end
 
 local function onAttachment(player: Player, slot: any, id: any)
@@ -467,9 +491,15 @@ local function onAttachment(player: Player, slot: any, id: any)
 		end
 		st.credits -= def.price
 		st.owned[key] = true
-		;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, key)
+		do
+			local target = remotes:FindFirstChild("Purchased") :: RemoteEvent
+			target:FireClient(player, key)
+		end
 	end
-	;(st.attachments :: any)[slot] = id
+	do
+		local target = st.attachments :: any
+		target[slot] = id
+	end
 	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		giveWeapon(player, humanoid)
@@ -485,22 +515,40 @@ local function onRepair(player: Player)
 	if Combat.hooks.repairReactor(player) then
 		st.credits -= Config.REPAIR_COST
 		publish(player)
-		;(remotes:FindFirstChild("Purchased") :: RemoteEvent):FireClient(player, "Repair")
+		do
+			local target = remotes:FindFirstChild("Purchased") :: RemoteEvent
+			target:FireClient(player, "Repair")
+		end
 	end
 end
 
 function Combat.init(remoteFolder: Folder)
 	remotes = remoteFolder
-	;(remotes:FindFirstChild("Shoot") :: RemoteEvent).OnServerEvent:Connect(onShoot)
-	;(remotes:FindFirstChild("Reload") :: RemoteEvent).OnServerEvent:Connect(function(player)
+	do
+		local target = remotes:FindFirstChild("Shoot") :: RemoteEvent
+		target.OnServerEvent:Connect(onShoot)
+	end
+	do
+		local target = remotes:FindFirstChild("Reload") :: RemoteEvent
+		target.OnServerEvent:Connect(function(player)
 		local st = states[player]
 		if st and st.ammo < Combat.stats(player).mag then
 			startReload(player)
 		end
 	end)
-	;(remotes:FindFirstChild("BuyUpgrade") :: RemoteEvent).OnServerEvent:Connect(onBuy)
-	;(remotes:FindFirstChild("RepairReactor") :: RemoteEvent).OnServerEvent:Connect(onRepair)
-	;(remotes:FindFirstChild("Attachment") :: RemoteEvent).OnServerEvent:Connect(onAttachment)
+	end
+	do
+		local target = remotes:FindFirstChild("BuyUpgrade") :: RemoteEvent
+		target.OnServerEvent:Connect(onBuy)
+	end
+	do
+		local target = remotes:FindFirstChild("RepairReactor") :: RemoteEvent
+		target.OnServerEvent:Connect(onRepair)
+	end
+	do
+		local target = remotes:FindFirstChild("Attachment") :: RemoteEvent
+		target.OnServerEvent:Connect(onAttachment)
+	end
 end
 
 return Combat

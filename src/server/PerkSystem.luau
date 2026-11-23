@@ -43,7 +43,10 @@ function PerkSystem.reset(player: Player)
 	stacks[player] = {}
 	queues[player] = {}
 	publish(player)
-	;(remotes:FindFirstChild("PerkOffer") :: RemoteEvent):FireClient(player, 0, {}, nil) -- closes any open picker
+	do
+		local target = remotes:FindFirstChild("PerkOffer") :: RemoteEvent
+		target:FireClient(player, 0, {}, nil) -- closes any open picker
+	end
 end
 
 function PerkSystem.remove(player: Player)
@@ -95,8 +98,13 @@ end
 
 function PerkSystem.init(remoteFolder: Folder)
 	remotes = remoteFolder
-	;(remotes:FindFirstChild("PickPerk") :: RemoteEvent).OnServerEvent:Connect(pick)
-	;(remotes:FindFirstChild("RerollPerk") :: RemoteEvent).OnServerEvent:Connect(function(player, offerId)
+	do
+		local target = remotes:FindFirstChild("PickPerk") :: RemoteEvent
+		target.OnServerEvent:Connect(pick)
+	end
+	do
+		local target = remotes:FindFirstChild("RerollPerk") :: RemoteEvent
+		target.OnServerEvent:Connect(function(player, offerId)
 		local q = queues[player]
 		local offer = q and q[1]
 		if not offer or offer.id ~= offerId then
@@ -111,6 +119,7 @@ function PerkSystem.init(remoteFolder: Folder)
 		end
 		send(player)
 	end)
+	end
 end
 
 return PerkSystem

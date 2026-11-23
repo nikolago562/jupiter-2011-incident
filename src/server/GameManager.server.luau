@@ -2,6 +2,10 @@
 -- JUPITER 2011 INCIDENT — run / wave loop.
 -- Lobby → Wave 1 → break (shop) → Wave 2 → … → the reactor falls or the whole crew is down → Game Over → Lobby.
 
+-- First thing, before anything can fail: never auto-spawn players.
+-- (If a script errors later, players must not drop into empty space where the ship should be.)
+game:GetService("Players").CharacterAutoLoads = false
+
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -350,6 +354,21 @@ local function onCharacter(player: Player, character: Model)
 end
 
 Players.CharacterAutoLoads = false
+
+-- safety net: anyone who falls out of the map is put back at the current spawn
+task.spawn(function()
+	while true do
+		for _, p in Players:GetPlayers() do
+			local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if hrp and hrp.Position.Y < -80 then
+				p.Character:PivotTo(stage.spawn.CFrame + Vector3.new(0, 4, 0))
+				hrp.AssemblyLinearVelocity = Vector3.zero
+			end
+		end
+		task.wait(0.5)
+	end
+end)
+
 local function onPlayerAdded(player: Player)
 	PlayerData.load(player)
 	Combat.reset(player)
